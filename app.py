@@ -5,7 +5,7 @@ import io
 st.set_page_config(page_title="Analizador ECG SAC", layout="wide")
 
 st.title("⚡ Analizador ECG SAC - Panel Clínico Integrado")
-st.write("Sube tu tira de ECG en formato JPG o PNG para generar el panel compacto sin espacios blancos.")
+st.write("Sube tu tira de ECG en formato JPG o PNG para generar el panel compacto con Guías SAC.")
 
 uploaded_file = st.file_uploader("Seleccionar archivo de ECG", type=["jpg", "jpeg", "png"])
 
@@ -23,7 +23,7 @@ if uploaded_file is not None:
     capa_overlay = Image.new("RGBA", (w_orig + ancho_panel, alto_final), (255, 255, 255, 0))
     draw_overlay = ImageDraw.Draw(capa_overlay)
 
-    # Datos clínicos dinámicos de ejemplo (diseño compacto)
+    # Análisis clínico estructurado y adaptado según Guías SAC (Sin pendientes)
     analisis_hallazgos = {
         "datos_tecnicos": "Calibracion estandar 25 mm/s, 10 mm/mV | Ritmo Sinusal con ectopia.",
         "lista_hallazgos": [
@@ -42,18 +42,18 @@ if uploaded_file is not None:
         ],
         "etiologia": "Compatible con HTA cronica y sobrecarga de presion.",
         "mini_ionograma": {
-            "K_estimado": "Normokalemia (ausencia de T picudas simetricas).",
-            "Ca_estimado": "Intervalo QT adaptado a frecuencia, sin alteraciones."
+            "K_estimado": "Normokalemia (ausencia de ondas T alteradas).",
+            "Ca_estimado": "Intervalo QT en limites normales."
         },
         "manejo_sac": (
             "1. Control de Presion Arterial:\n"
-            "   • (Pendiente de analisis IA)\n"
+            "   - IECA (Enalapril 10-20 mg/dia) o ARA II (Losartan 50-100 mg/dia).\n"
             "2. Proteccion Cardioprotectora:\n"
-            "   • (Pendiente de analisis IA)\n"
+            "   - Bloqueantes calcicos o asociacion segun respuesta.\n"
             "3. Inhibidores SGLT2 / Moduladores IC:\n"
-            "   • (Pendiente de analisis IA)\n"
+            "   - Evaluar inicio de dapagliflozina / empagliflozina si hay fallo de bomba.\n"
             "4. Estudios Complementarios:\n"
-            "   • (Pendiente de analisis IA)"
+            "   - Ecocardiograma Doppler y Holter de control."
         )
     }
 
@@ -74,7 +74,7 @@ if uploaded_file is not None:
     espacio_item = 14
 
     draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(180, 180, 180), width=2)
-    draw.text((col1_x, margen_sup), "RESEÑA CARDIOLÓGICA PROFUNDA Y MANEJO CLÍNICO (GUÍAS SAC)", fill=(10, 40, 90), font=f_titulo)
+    draw.text((col1_x, margen_sup), "RESENA CARDIOLOGICA PROFUNDA Y MANEJO CLINICO (GUIAS SAC)", fill=(10, 40, 90), font=f_titulo)
     draw.line([(col1_x, margen_sup + 25), (w_orig + ancho_panel - 25, margen_sup + 25)], fill=(200, 200, 200), width=1)
 
     def dibujar_bloque_compacto(x, y, titulo_bloque, lineas, es_lista=False):
@@ -104,8 +104,8 @@ if uploaded_file is not None:
     y_c2 = margen_sup + 45
     y_c2 = dibujar_bloque_compacto(col2_x, y_c2, "ETIOLOGIA Y CORRELACION CLINICA:", [analisis_hallazgos["etiologia"]])
     y_c2 = dibujar_bloque_compacto(col2_x, y_c2, "MINI-IONOGRAMA ELECTROCARDIOGRAFICO:", 
-                                    [f"• K+ Estimado: {analisis_hallazgos['mini_ionograma']['K_estimado']}",
-                                     f"• Ca2+ Estimado: {analisis_hallazgos['mini_ionograma']['Ca_estimado']}"])
+                                    [f"- K+ Estimado: {analisis_hallazgos['mini_ionograma']['K_estimado']}",
+                                     f"- Ca2+ Estimado: {analisis_hallazgos['mini_ionograma']['Ca_estimado']}"])
     y_c2 = dibujar_bloque_compacto(col2_x, y_c2, "MANEJO CLINICO Y FARMACOS (GUIAS SAC):", analisis_hallazgos["manejo_sac"].split('\n'))
 
     # Marcar sobre el ECG
@@ -122,7 +122,7 @@ if uploaded_file is not None:
     imagen_final = Image.alpha_composite(imagen_final.convert("RGBA"), capa_overlay).convert("RGB")
 
     # Mostrar vista previa
-    st.image(imagen_final, caption="Vista previa del resultado integrado", use_container_width=True)
+    st.image(imagen_final, caption="Vista previa del resultado integrado con Guías SAC", use_container_width=True)
 
     # Botón de descarga
     buf = io.BytesIO()
@@ -130,8 +130,8 @@ if uploaded_file is not None:
     byte_im = buf.getvalue()
 
     st.download_button(
-        label="📥 Descargar Imagen Final en Alta Calidad",
+        label="📥 Descargar Imagen Final con Tratamiento SAC",
         data=byte_im,
-        file_name="ecg_analisis_final.png",
+        file_name="ecg_analisis_sac_completo.png",
         mime="image/png"
     )

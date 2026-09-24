@@ -4,8 +4,12 @@ import io
 
 st.set_page_config(page_title="Analizador ECG SAC", layout="wide")
 
-st.title("⚡ Analizador ECG SAC - Panel Clínico Integrado")
-st.write("Sube tu tira de ECG para generar el panel compacto optimizado (Guías SAC).")
+# --- CONTROL DE ENTRADA API (MIT APP INVENTOR) ---
+modo_api = st.query_params.get("mode") == "api"
+
+if not modo_api:
+    st.title("⚡ Analizador ECG SAC - Panel Clínico Integrado")
+    st.write("Sube tu tira de ECG para generar el panel compacto optimizado (Guías SAC).")
 
 uploaded_file = st.file_uploader("Seleccionar archivo de ECG", type=["jpg", "jpeg", "png"])
 
@@ -14,19 +18,18 @@ if uploaded_file is not None:
     ecg_orig = Image.open(uploaded_file).convert("RGB")
     w_orig, h_orig = ecg_orig.size
 
-    # --- DISEÑO COMPACTO PROPORCIONAL ---
-    # El ancho del panel lateral se fija a 1050 px para evitar espacios muertos
+    # --- DISEÑO COMPACTO PROPORCIONAL (AJUSTADO PARA EVITAR ESPACIOS BLANCOS) ---
     ancho_panel = 1050
-    alto_final = h_orig
+    # Ajustamos la altura final al tamaño exacto de la tira para no generar vacíos innecesarios
+    alto_final = h_orig 
     
-    # Crear lienzo exacto sin sobrantes de altura
     imagen_final = Image.new("RGB", (w_orig + ancho_panel, alto_final), color=(255, 255, 255))
     imagen_final.paste(ecg_orig, (0, 0))
 
     capa_overlay = Image.new("RGBA", (w_orig + ancho_panel, alto_final), (255, 255, 255, 0))
     draw_overlay = ImageDraw.Draw(capa_overlay)
 
-    # Datos clínicos estructurados Guías SAC
+    # Datos clínicos estructurados Guías SAC (Tu estructura original intacta)
     analisis_hallazgos = {
         "datos_tecnicos": "Calibracion: 25 mm/s, 10 mm/mV | Ritmo Sinusal.",
         "lista_hallazgos": [
@@ -119,17 +122,20 @@ if uploaded_file is not None:
     
     imagen_final = Image.alpha_composite(imagen_final.convert("RGBA"), capa_overlay).convert("RGB")
 
-    # Mostrar vista previa
-    st.image(imagen_final, caption="Panel Clínico Optimizado y Compacto", use_container_width=True)
-
-    # Botón de descarga directa
+    # Guardar en buffer
     buf = io.BytesIO()
     imagen_final.save(buf, format="PNG", compress_level=0)
     byte_im = buf.getvalue()
 
-    st.download_button(
-        label="📥 Descargar Imagen Compacta Definitiva",
-        data=byte_im,
-        file_name="ecg_compacto_sac.png",
-        mime="image/png"
-    )
+    # Si la app de App Inventor lo pide por API, devuelve los bytes directos
+    if modo_api:
+        st.write(byte_im)
+    else:
+        # Mostrar vista previa normal en la web
+        st.image(imagen_final, caption="Panel Clínico Optimizado y Compacto", use_container_width=True)
+        st.download_button(
+            label="📥 Descargar Imagen Compacta Definitiva",
+            data=byte_im,
+            file_name="ecg_compacto_sac.png",
+            mime="image/png"
+        )

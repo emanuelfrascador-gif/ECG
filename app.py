@@ -1,7 +1,7 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 import io
-import base64
+
 st.set_page_config(page_title="Analizador ECG SAC", layout="wide")
 
 # --- CONTROL DE ENTRADA API (MIT APP INVENTOR) ---
@@ -11,11 +11,7 @@ if not modo_api:
     st.title("⚡ Analizador ECG SAC - Panel Clínico Integrado")
     st.write("Sube tu tira de ECG para generar el panel compacto optimizado (Guías SAC).")
 
-# Lee el texto plano mandado por PostText
-raw_text = st.experimental_get_query_params().get("data", [None])[0]
-if raw_text:
-  image_bytes = base64.b64decode(raw_text)
-  # Usa 'image_bytes' como tu imagen
+uploaded_file = st.file_uploader("Seleccionar archivo de ECG", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     # Cargar imagen original

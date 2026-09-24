@@ -1,8 +1,9 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 import io
-import streamlit as st
 
+st.set_page_config(page_title="Analizador ECG SAC", layout="wide")
+st.set_option('client.toolbarMode', 'minimal')
 
 # --- CONTROL DE ENTRADA API (MIT APP INVENTOR) ---
 modo_api = st.query_params.get("mode") == "api"
@@ -13,9 +14,7 @@ if not modo_api:
 
 uploaded_file = st.file_uploader("Seleccionar archivo de ECG", type=["jpg", "jpeg", "png"])
 # Desactiva las llamadas a localStorage que rompen en el WebViewer
-st.set_option('client.toolbarMode', 'minimal')
 
-st.set_page_config(page_title="Analizador ECG SAC", layout="wide")
 
 if uploaded_file is not None:
     # Cargar imagen original

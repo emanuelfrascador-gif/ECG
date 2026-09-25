@@ -14,7 +14,7 @@ client = genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG con Panel Dinámico activa."
+    return "API de Procesamiento de ECG con Marcas Sincronizadas activa."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -58,18 +58,18 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # --- PROMPT MAESTRO CLÍNICO ESTRICTO (GUÍAS SAC) ---
+    # --- PROMPT MAESTRO ESTRICTO CON REFERENCIA DE COORDENADAS ---
     prompt_maestro = (
         "Actúa como un médico cardiólogo experto basándote estrictamente en las Guías de la Sociedad Argentina de Cardiología (SAC). "
-        "Analiza a fondo esta tira de electrocardiograma (ECG) subida por el usuario. Realiza un análisis clínico real de la imagen. "
+        "Analiza a fondo esta tira de electrocardiograma (ECG). "
         "Devuelve la respuesta exclusivamente en un formato JSON plano, con las siguientes claves exactas:\n"
-        "1. 'datos_tecnicos': string indicando velocidad, voltaje, ritmo y eje estimado.\n"
-        "2. 'lista_hallazgos': lista de strings con los hallazgos patológicos o variantes encontrados.\n"
-        "3. 'etiologia': string con la correlación clínica o causa probable.\n"
-        "4. 'k_estimado': string con estimación de alteraciones de potasio basadas en la morfología de la onda T.\n"
-        "5. 'ca_estimado': string con estimación de calcio y estado del intervalo QT adaptado.\n"
-        "6. 'manejo_sac': string detallado con el plan de manejo clínico, fármacos específicos y dosis recomendadas según Guías SAC.\n"
-        "7. 'marcas': lista de objetos con 'x_porcentaje' (0-100), 'y_porcentaje' (0-100), y 'tipo' ('hvi', 'conduccion', 'onda_p', 'st_t')."
+        "1. 'datos_tecnicos': string indicando velocidad, voltaje, ritmo y eje.\n"
+        "2. 'lista_hallazgos': lista de strings con los hallazgos patológicos.\n"
+        "3. 'etiologia': string con la correlación clínica.\n"
+        "4. 'k_estimado': string con estimación de potasio.\n"
+        "5. 'ca_estimado': string con estimación de calcio y QT.\n"
+        "6. 'manejo_sac': string detallado con fármacos y dosis recomendadas según Guías SAC.\n"
+        "7. 'marcas': lista de objetos con 'x_porcentaje' (número de 0 a 100 relativo EXCLUSIVAMENTE al ancho de la tira de ECG), 'y_porcentaje' (número de 0 a 100 relativo al alto de la tira), y 'tipo' ('hvi', 'conduccion', 'onda_p', 'st_t')."
     )
 
     try:
@@ -85,7 +85,7 @@ def analizar_ecg():
     except Exception as e:
         analisis_hallazgos = {
             "datos_tecnicos": "Calibracion: 25 mm/s, 10 mm/mV | Ritmo Sinusal.",
-            "lista_hallazgos": ["Evaluación dinámica en curso."],
+            "lista_hallazgos": ["Evaluación en curso."],
             "etiologia": "Correlacionar con clínica.",
             "k_estimado": "Normal",
             "ca_estimado": "Normal",
@@ -93,8 +93,6 @@ def analizar_ecg():
             "marcas": []
         }
 
-    # --- ANCHO DE PANEL ÓPTIMO Y ESTÉTICO ---
-    # Reducido a 680 píxeles para compactar la reseña y evitar espacios blancos muertos excesivos
     ancho_panel = 680
     alto_final = h_orig 
     
@@ -113,15 +111,11 @@ def analizar_ecg():
         f_titulo = f_sub = f_texto = ImageFont.load_default()
 
     col_x = w_orig + 15
-    ancho_util_col = ancho_panel - 30
     margen_sup = 12
     espacio_bloque = 8
     espacio_item = 11
 
-    # Línea divisoria vertical elegante entre el ECG y el panel de reseña
     draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(210, 210, 210), width=1)
-    
-    # Encabezado del panel
     draw.text((col_x, margen_sup), "RESEÑA CARDIOLÓGICA Y MANEJO (GUÍAS SAC)", fill=(15, 45, 95), font=f_titulo)
     draw.line([(col_x, margen_sup + 18), (w_orig + ancho_panel - 15, margen_sup + 18)], fill=(220, 220, 220), width=1)
 
@@ -133,7 +127,6 @@ def analizar_ecg():
             y += espacio_item
         return y + espacio_bloque
 
-    # Extracción de variables clínicas
     tek_datos = analisis_hallazgos.get("datos_tecnicos", "Ritmo Sinusal")
     lst_hall = analisis_hallazgos.get("lista_hallazgos", [])
     etiq = analisis_hallazgos.get("etiologia", "Sin especificar")
@@ -143,14 +136,12 @@ def analizar_ecg():
     marcas_ia = analisis_hallazgos.get("marcas", [])
 
     y_actual = margen_sup + 28
-    
-    # Renderizado ordenado por bloques compactos
     y_actual = dibujar_seccion_compacta(y_actual, "DATOS TÉCNICOS Y HALLAZGOS CLÍNICOS:", [tek_datos] + lst_hall)
     y_actual = dibujar_seccion_compacta(y_actual, "ETIOLOGÍA Y CORRELACIÓN:", [etiq])
     y_actual = dibujar_seccion_compacta(y_actual, "MINI-IONOGRAMA ESTIMADO:", [f"K+: {k_est}", f"Ca2+ / QT: {ca_est}"])
     y_actual = dibujar_seccion_compacta(y_actual, "MANEJO CLÍNICO Y FARMACOLOGÍA (SAC):", manejo.split('\n'))
 
-    # Coordenadas y marcas transparentes sobre el trazo original del ECG
+    # Coordenadas y marcas transparentes estrictamente limitadas al ancho de la tira (w_orig)
     colores_map = {
         'hvi': (178, 60, 60, 100),       
         'conduccion': (50, 120, 200, 100), 
@@ -160,8 +151,16 @@ def analizar_ecg():
 
     for m in marcas_ia:
         try:
-            px = int(w_orig * (float(m.get("x_porcentaje", 50)) / 100.0))
-            py = int(h_orig * (float(m.get("y_porcentaje", 50)) / 100.0))
+            x_pct = float(m.get("x_porcentaje", 50))
+            y_pct = float(m.get("y_porcentaje", 50))
+            
+            # Blindaje geométrico: si la IA manda un porcentaje mayor a 100, lo acotamos
+            if x_pct > 100: x_pct = 100
+            if y_pct > 100: y_pct = 100
+
+            px = int(w_orig * (x_pct / 100.0))
+            py = int(h_orig * (y_pct / 100.0))
+            
             tipo = m.get("tipo", "hvi")
             rgba = colores_map.get(tipo, (178, 60, 60, 100))
             

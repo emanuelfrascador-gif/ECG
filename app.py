@@ -9,8 +9,8 @@ import google.generativeai as genai
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 
-# Configuramos la API Key directamente desde la variable de entorno de Render
-api_key = os.environ.get("GEMINI_API_KEY", "")
+# Configuramos la API Key tomando cualquiera de las dos variables posibles en Render
+api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 genai.configure(api_key=api_key)
 
 @app.route("/", methods=["GET"])
@@ -75,8 +75,8 @@ def analizar_ecg():
     analisis_hallazgos = {}
     try:
         print("Enviando imagen a Gemini con la librería clásica...")
-        # Usamos el modelo flash estable compatible con la API clásica
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Usamos gemini-1.5-flash-latest para asegurar compatibilidad total en v1beta
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(
             [ecg_orig, prompt_maestro],
             generation_config={"response_mime_type": "application/json", "temperature": 0.1}

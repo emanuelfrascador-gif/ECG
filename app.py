@@ -4,17 +4,18 @@ import base64
 import json
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 
-client = genai.Client()
+# Configuramos la API Key directamente desde la variable de entorno de Render
+api_key = os.environ.get("GEMINI_API_KEY", "")
+genai.configure(api_key=api_key)
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento con IA Real Activa."
+    return "API de Procesamiento de ECG con Compatibilidad Total activa."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -58,7 +59,6 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # --- LLAMADA REAL A LA IA CON PROMPT MAESTRO SAC ---
     prompt_maestro = (
         "Actúa como un médico cardiólogo experto bajo Guías de la Sociedad Argentina de Cardiología (SAC). "
         "Analiza esta tira de ECG real. "
@@ -74,16 +74,14 @@ def analizar_ecg():
 
     analisis_hallazgos = {}
     try:
-        print("Enviando imagen a Gemini para análisis clínico real...")
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[ecg_orig, prompt_maestro],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.1
-            )
+        print("Enviando imagen a Gemini con la librería clásica...")
+        # Usamos el modelo flash estable compatible con la API clásica
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(
+            [ecg_orig, prompt_maestro],
+            generation_config={"response_mime_type": "application/json", "temperature": 0.1}
         )
-        print("Respuesta recibida de Gemini:", response.text[:200])
+        print("Respuesta recibida:", response.text[:200])
         analisis_hallazgos = json.loads(response.text)
     except Exception as e:
         print("ERROR CRÍTICO LLAMANDO A GEMINI:", str(e))

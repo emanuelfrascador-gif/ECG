@@ -1,24 +1,29 @@
 import io
+import base64
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
-# Configurar el límite máximo de tamaño para archivos subidos (ej. 32 Megabytes)
+# Sin restricciones de tamaño para cadenas largas en JSON
 app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
+
 @app.route("/", methods=["GET"])
 def home():
     return "API de Procesamiento de ECG funcionando correctamente."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    # Verificamos si llegó un archivo en la petición POST desde App Inventor
-    if "file" not in request.files:
-        return {"error": "No se encontró ningún archivo"}, 400
+    # Recibimos los datos en formato JSON enviados desde App Inventor
+    data = request.get_json(silent=True)
+    if not data or "image" not in data:
+        return {"error": "No se encontró la imagen en formato JSON"}, 400
     
-    uploaded_file = request.files["file"]
-    
-    if uploaded_file.filename == "":
-        return {"error": "Nombre de archivo vacío"}, 400
+    try:
+        # Decodificamos el string Base64 a bytes puros de imagen
+        image_data = base64.b64decode(data["image"])
+        uploaded_file = io.BytesIO(image_data)
+    except Exception as e:
+        return {"error": "Error al decodificar Base64"}, 400
 
     # --- TODO TU DISEÑO Y LÓGICA ORIGINAL INTACTOS ---
     ecg_orig = Image.open(uploaded_file).convert("RGB")
@@ -122,7 +127,6 @@ def analizar_ecg():
     imagen_final = Image.alpha_composite(imagen_final.convert("RGBA"), capa_overlay).convert("RGB")
     # --------------------------------------------------------
 
-    # Guardar en buffer de memoria para devolver la imagen procesada directo
     buf = io.BytesIO()
     imagen_final.save(buf, format="PNG", compress_level=0)
     buf.seek(0)

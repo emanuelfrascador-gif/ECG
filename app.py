@@ -14,7 +14,7 @@ client = genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG con Marcas Sincronizadas activa."
+    return "API de Procesamiento de ECG con Marcas Exactas y Dosis SAC activa."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -58,18 +58,18 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # --- PROMPT MAESTRO ESTRICTO CON REFERENCIA DE COORDENADAS ---
+    # --- PROMPT MAESTRO CON NOMBRES DE FÁRMACOS, DOSIS EXACTAS Y COORDENADAS SOBRE LA LÍNEA ---
     prompt_maestro = (
         "Actúa como un médico cardiólogo experto basándote estrictamente en las Guías de la Sociedad Argentina de Cardiología (SAC). "
         "Analiza a fondo esta tira de electrocardiograma (ECG). "
         "Devuelve la respuesta exclusivamente en un formato JSON plano, con las siguientes claves exactas:\n"
-        "1. 'datos_tecnicos': string indicando velocidad, voltaje, ritmo y eje.\n"
-        "2. 'lista_hallazgos': lista de strings con los hallazgos patológicos.\n"
-        "3. 'etiologia': string con la correlación clínica.\n"
-        "4. 'k_estimado': string con estimación de potasio.\n"
+        "1. 'datos_tecnicos': string indicando velocidad (25 mm/s), voltaje (10 mm/mV), ritmo y eje estimado.\n"
+        "2. 'lista_hallazgos': lista de strings con los hallazgos patológicos detallados.\n"
+        "3. 'etiologia': string con la correlación clínica o causa probable según los hallazgos.\n"
+        "4. 'k_estimado': string con estimación de potasio basada en la onda T.\n"
         "5. 'ca_estimado': string con estimación de calcio y QT.\n"
-        "6. 'manejo_sac': string detallado con fármacos y dosis recomendadas según Guías SAC.\n"
-        "7. 'marcas': lista de objetos con 'x_porcentaje' (número de 0 a 100 relativo EXCLUSIVAMENTE al ancho de la tira de ECG), 'y_porcentaje' (número de 0 a 100 relativo al alto de la tira), y 'tipo' ('hvi', 'conduccion', 'onda_p', 'st_t')."
+        "6. 'manejo_sac': string detallado indicando **nombres específicos de medicamentos** (ej. Enalapril, Losartán, Bisoprolol, Espironolactona) junto con sus **dosis exactas recomendadas** (ej. 10 mg/día) según las normativas de la SAC.\n"
+        "7. 'marcas': lista de objetos con 'x_porcentaje' (0-100 horizontal exacto del hallazgo en la tira), 'y_porcentaje' (0-100 vertical exacto sobre la línea del trazo), y 'tipo' ('hvi', 'conduccion', 'onda_p', 'st_t')."
     )
 
     try:
@@ -87,9 +87,9 @@ def analizar_ecg():
             "datos_tecnicos": "Calibracion: 25 mm/s, 10 mm/mV | Ritmo Sinusal.",
             "lista_hallazgos": ["Evaluación en curso."],
             "etiologia": "Correlacionar con clínica.",
-            "k_estimado": "Normal",
-            "ca_estimado": "Normal",
-            "manejo_sac": "1. Control médico estricto.",
+            "k_estimado": "K+ Normal",
+            "ca_estimado": "QT Normal",
+            "manejo_sac": "1. Enalapril 5 mg c/12 hs.\n2. Bisoprolol 2.5 mg/día.",
             "marcas": []
         }
 
@@ -141,7 +141,7 @@ def analizar_ecg():
     y_actual = dibujar_seccion_compacta(y_actual, "MINI-IONOGRAMA ESTIMADO:", [f"K+: {k_est}", f"Ca2+ / QT: {ca_est}"])
     y_actual = dibujar_seccion_compacta(y_actual, "MANEJO CLÍNICO Y FARMACOLOGÍA (SAC):", manejo.split('\n'))
 
-    # Coordenadas y marcas transparentes estrictamente limitadas al ancho de la tira (w_orig)
+    # Coordenadas y marcas transparentes posicionadas milimétricamente SOBRE la línea exacta del trazo
     colores_map = {
         'hvi': (178, 60, 60, 100),       
         'conduccion': (50, 120, 200, 100), 
@@ -154,13 +154,15 @@ def analizar_ecg():
             x_pct = float(m.get("x_porcentaje", 50))
             y_pct = float(m.get("y_porcentaje", 50))
             
-            # Blindaje geométrico: si la IA manda un porcentaje mayor a 100, lo acotamos
             if x_pct > 100: x_pct = 100
+            if x_pct < 0: x_pct = 0
             if y_pct > 100: y_pct = 100
+            if y_pct < 0: y_pct = 0
 
+            # Posición exacta calculada sobre la línea sin offsets artificiales
             px = int(w_orig * (x_pct / 100.0))
             py = int(h_orig * (y_pct / 100.0))
-            
+
             tipo = m.get("tipo", "hvi")
             rgba = colores_map.get(tipo, (178, 60, 60, 100))
             

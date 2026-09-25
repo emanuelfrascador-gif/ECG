@@ -2,6 +2,7 @@ import io
 import os
 import base64
 import json
+import time
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
@@ -10,8 +11,6 @@ from google.genai import types
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 
-# Inicializamos el cliente de Gemini. Si detecta la clave la usa, 
-# y si no, busca alternativas de entorno automáticamente.
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 if api_key:
     client = genai.Client(api_key=api_key)
@@ -20,7 +19,7 @@ else:
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG con SDK Moderno activa."
+    return "API de Procesamiento de ECG Activa."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -62,6 +61,8 @@ def analizar_ecg():
         except Exception as e2:
             return {"error": f"Imagen no válida: {str(e2)}"}, 400
 
+    # Compresión obligatoria para evitar error de cuota/memoria
+    ecg_orig.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
     w_orig, h_orig = ecg_orig.size
 
     prompt_maestro = (
@@ -79,7 +80,6 @@ def analizar_ecg():
 
     analisis_hallazgos = {}
     try:
-        print("Enviando imagen a Gemini con el SDK moderno...")
         response = client.models.generate_content(
             model='gemini-1.5-flash',
             contents=[ecg_orig, prompt_maestro],
@@ -88,10 +88,8 @@ def analizar_ecg():
                 temperature=0.1
             ),
         )
-        print("Respuesta recibida:", response.text[:200])
         analisis_hallazgos = json.loads(response.text)
     except Exception as e:
-        print("ERROR CRÍTICO LLAMANDO A GEMINI:", str(e))
         return {"error": f"Fallo en la IA: {str(e)}"}, 500
 
     ancho_panel = 680
@@ -180,3 +178,4 @@ def analizar_ecg():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+    

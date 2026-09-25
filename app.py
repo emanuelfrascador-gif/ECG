@@ -1,29 +1,29 @@
-import streamlit as st
-from PIL import Image, ImageDraw, ImageFont
 import io
+from flask import Flask, request, send_file
+from PIL import Image, ImageDraw, ImageFont
 
-st.set_page_config(page_title="Analizador ECG SAC", layout="wide")
-st.set_option('client.toolbarMode', 'minimal')
+app = Flask(__name__)
 
-# --- CONTROL DE ENTRADA API (MIT APP INVENTOR) ---
-modo_api = st.query_params.get("mode") == "api"
+@app.route("/", methods=["GET"])
+def home():
+    return "API de Procesamiento de ECG funcionando correctamente."
 
-if not modo_api:
-    st.title("⚡ Analizador ECG SAC - Panel Clínico Integrado")
-    st.write("Sube tu tira de ECG para generar el panel compacto optimizado (Guías SAC).")
+@app.route("/analizar", methods=["POST"])
+def analizar_ecg():
+    # Verificamos si llegó un archivo en la petición POST desde App Inventor
+    if "file" not in request.files:
+        return {"error": "No se encontró ningún archivo"}, 400
+    
+    uploaded_file = request.files["file"]
+    
+    if uploaded_file.filename == "":
+        return {"error": "Nombre de archivo vacío"}, 400
 
-uploaded_file = st.file_uploader("Seleccionar archivo de ECG", type=["jpg", "jpeg", "png"])
-# Desactiva las llamadas a localStorage que rompen en el WebViewer
-
-
-if uploaded_file is not None:
-    # Cargar imagen original
+    # --- TODO TU DISEÑO Y LÓGICA ORIGINAL INTACTOS ---
     ecg_orig = Image.open(uploaded_file).convert("RGB")
     w_orig, h_orig = ecg_orig.size
 
-    # --- DISEÑO COMPACTO PROPORCIONAL (AJUSTADO PARA EVITAR ESPACIOS BLANCOS) ---
     ancho_panel = 1050
-    # Ajustamos la altura final al tamaño exacto de la tira para no generar vacíos innecesarios
     alto_final = h_orig 
     
     imagen_final = Image.new("RGB", (w_orig + ancho_panel, alto_final), color=(255, 255, 255))
@@ -32,7 +32,6 @@ if uploaded_file is not None:
     capa_overlay = Image.new("RGBA", (w_orig + ancho_panel, alto_final), (255, 255, 255, 0))
     draw_overlay = ImageDraw.Draw(capa_overlay)
 
-    # Datos clínicos estructurados Guías SAC (Tu estructura original intacta)
     analisis_hallazgos = {
         "datos_tecnicos": "Calibracion: 25 mm/s, 10 mm/mV | Ritmo Sinusal.",
         "lista_hallazgos": [
@@ -60,7 +59,6 @@ if uploaded_file is not None:
         )
     }
 
-    # Dibujado optimizado para fuentes limpias
     draw = ImageDraw.Draw(imagen_final)
     try:
         f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
@@ -76,7 +74,6 @@ if uploaded_file is not None:
     espacio_bloque = 12 
     espacio_item = 12
 
-    # Línea divisoria vertical exacta
     draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(180, 180, 180), width=2)
     draw.text((col1_x, margen_sup), "RESENA CARDIOLOGICA Y MANEJO CLINICO (GUIAS SAC)", fill=(10, 40, 90), font=f_titulo)
     draw.line([(col1_x, margen_sup + 22), (w_orig + ancho_panel - 15, margen_sup + 22)], fill=(200, 200, 200), width=1)
@@ -100,7 +97,6 @@ if uploaded_file is not None:
                 y += espacio_item
         return y + (espacio_bloque / 2)
 
-    # Distribución en 2 columnas equilibradas y compactas
     y_c1 = margen_sup + 35
     y_c1 = dibujar_bloque_compacto(col1_x, y_c1, "DATOS TECNICOS Y HALLAZGOS:", [analisis_hallazgos["datos_tecnicos"]] + analisis_hallazgos["lista_hallazgos"])
     y_c1 = dibujar_bloque_compacto(col1_x, y_c1, "LEYENDA Y PARAMETROS:", analisis_hallazgos["leyenda"], es_lista=True)
@@ -112,7 +108,6 @@ if uploaded_file is not None:
                                      f"- Ca2+: {analisis_hallazgos['mini_ionograma']['Ca_estimado']}"])
     y_c2 = dibujar_bloque_compacto(col2_x, y_c2, "MANEJO CLINICO Y FARMACOS (GUIAS SAC):", analisis_hallazgos["manejo_sac"].split('\n'))
 
-    # Marcar sutilmente sobre el ECG
     puntos_marcar = [
         (int(w_orig * 0.63), int(h_orig * 0.73), (178, 60, 60, 100)),
         (int(w_orig * 0.93), int(h_orig * 0.74), (178, 60, 60, 100)),
@@ -124,21 +119,14 @@ if uploaded_file is not None:
         draw_overlay.ellipse([px-r, py-r, px+r, py+r], fill=rgba, outline=rgba)
     
     imagen_final = Image.alpha_composite(imagen_final.convert("RGBA"), capa_overlay).convert("RGB")
+    # --------------------------------------------------------
 
-    # Guardar en buffer
+    # Guardar en buffer de memoria para devolver la imagen procesada directo
     buf = io.BytesIO()
     imagen_final.save(buf, format="PNG", compress_level=0)
-    byte_im = buf.getvalue()
+    buf.seek(0)
 
-    # Si la app de App Inventor lo pide por API, devuelve los bytes directos
-    if modo_api:
-        st.write(byte_im)
-    else:
-        # Mostrar vista previa normal en la web
-        st.image(imagen_final, caption="Panel Clínico Optimizado y Compacto", use_container_width=True)
-        st.download_button(
-            label="📥 Descargar Imagen Compacta Definitiva",
-            data=byte_im,
-            file_name="ecg_compacto_sac.png",
-            mime="image/png"
-        )
+    return send_file(buf, mimetype="image/png")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

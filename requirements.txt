@@ -1,4 +1,5 @@
 flask
 pillow
-google-genai
+google-generativeai
 gunicorn
+requests

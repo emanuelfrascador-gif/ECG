@@ -4,8 +4,6 @@ import base64
 import json
 import time
 import textwrap
-import cv2
-import numpy as np
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
@@ -16,34 +14,6 @@ app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 client = genai.Client(api_key=api_key) if api_key else genai.Client()
-
-def recortar_ecg_opencv(pil_img):
-    try:
-        # Convertir PIL a array de OpenCV (RGB a BGR)
-        img_array = np.array(pil_img)
-        img_bgr = img_array[:, :, ::-1].copy()
-        
-        # Escala de grises y desenfoque
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        
-        # Binarización para separar el papel claro del fondo oscuro
-        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Encontrar contornos
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours:
-            c = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(c)
-            
-            # Validar que el recorte tenga sentido (al menos 30% del tamaño original)
-            if (w * h) > (img_bgr.shape[0] * img_bgr.shape[1] * 0.3):
-                recorte = img_bgr[y:y+h, x:x+w]
-                recorte_rgb = cv2.cvtColor(recorte, cv2.COLOR_BGR2RGB)
-                return Image.fromarray(recorte_rgb)
-    except Exception as e:
-        print(f"Fallo en autorte: {e}", flush=True)
-    return pil_img
 
 @app.route("/", methods=["GET"])
 def home():
@@ -75,8 +45,6 @@ def analizar_ecg():
         except Exception as e:
             return {"error": f"Error base64: {str(e)}"}, 400
 
-    # Auto-recortar fondo de mesa
-    ecg_orig = recortar_ecg_opencv(ecg_orig)
     ecg_orig.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
     w_orig, h_orig = ecg_orig.size
 
@@ -172,19 +140,19 @@ def analizar_ecg():
 
         def render_txt(x, y, titulo, lineas):
             draw.text((x, y), titulo, fill=(40, 80, 140), font=f_sub)
-            y += 20  # Mayor espacio bajo el título
+            y += 20  
             for item in lineas:
                 parrafos = textwrap.wrap(f"• {item}", width=col_w)
                 for p in parrafos:
                     draw.text((x, y), p, fill=(50, 50, 50), font=f_texto)
-                    y += 16  # Mayor interlineado para evitar encimamientos
+                    y += 16  
             return y + 20
 
         # Columna 1
         y_c1 = render_txt(c1_x, 45, "DATOS TÉCNICOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
-        # Leyenda Dinámica: Solo dibuja los colores que tienen coordenadas en la tira
+        # Leyenda Dinámica
         if tipos_presentes:
             draw.text((c1_x, y_c1), "LEYENDA DE COLORES:", fill=(40, 80, 140), font=f_sub)
             y_c1 += 20
@@ -199,7 +167,7 @@ def analizar_ecg():
         y_c3 = render_txt(c3_x, 45, "ETIOLOGÍA:", [str(analisis_hallazgos.get("etiologia", "N/A"))])
         render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y TRATAMIENTO:", manejo)
 
-        # Renderizado de marcas de tamaño fijo, bien transparentes y centradas
+        # Renderizado de marcas
         for m in marcas_ia:
             try:
                 t = str(m.get("tipo", "")).lower()

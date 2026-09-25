@@ -81,7 +81,7 @@ def analizar_ecg():
     try:
         print("Enviando imagen a Gemini con el SDK moderno...")
         response = client.models.generate_content(
-            model='gemini-2.5-pro',
+            model='gemini-3.1-pro-preview',
             contents=[ecg_orig, prompt_maestro],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",

@@ -53,11 +53,26 @@ def analizar_ecg():
         "'manejo_sac', 'marcas' (array de objetos con x_porcentaje, y_porcentaje, tipo)."
     )
 
-    modelos = ['gemini-1.5-flash-latest', 'gemini-1.5-flash-002', 'gemini-1.5-flash']
+    # AUTODESCUBRIMIENTO DE MODELOS: Busca qué modelos tenés habilitados realmente
+    modelos_autorizados = []
+    try:
+        print("Buscando modelos Flash autorizados para tu API key...", flush=True)
+        for m in client.models.list():
+            nombre = m.name.replace('models/', '')
+            if 'flash' in nombre.lower():
+                modelos_autorizados.append(nombre)
+        print(f"Modelos permitidos detectados: {modelos_autorizados}", flush=True)
+    except Exception as e:
+        print(f"Fallo listando modelos: {e}", flush=True)
+    
+    if not modelos_autorizados:
+        # Fallback de emergencia a modelos recientes
+        modelos_autorizados = ['gemini-2.0-flash', 'gemini-3.1-flash', 'gemini-2.5-flash']
+
     analisis_hallazgos = None
     ultimo_error = ""
 
-    for modelo in modelos:
+    for modelo in modelos_autorizados:
         try:
             print(f"Llamando a {modelo}...", flush=True)
             response = client.models.generate_content(
@@ -67,7 +82,7 @@ def analizar_ecg():
             )
             texto_limpio = response.text.replace("```json", "").replace("```", "").strip()
             analisis_hallazgos = json.loads(texto_limpio)
-            print(f"Éxito con {modelo}", flush=True)
+            print(f"Éxito absoluto con {modelo}", flush=True)
             break
         except Exception as e:
             ultimo_error = str(e)
@@ -75,7 +90,7 @@ def analizar_ecg():
             time.sleep(1)
 
     if not analisis_hallazgos:
-        return {"error": f"IA falló: {ultimo_error}"}, 500
+        return {"error": f"IA falló en todos los modelos. Último error: {ultimo_error}"}, 500
 
     try:
         ancho_panel = 680

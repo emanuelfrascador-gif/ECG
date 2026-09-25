@@ -1,3 +1,4 @@
-Flask
-Pillow
+flask
+pillow
+google-genai
 gunicorn

@@ -78,7 +78,7 @@ def analizar_ecg():
         ecg_orig.save(buffered, format="JPEG")
         img_b64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [
                 {

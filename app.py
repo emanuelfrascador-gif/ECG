@@ -3,6 +3,7 @@ import os
 import base64
 import json
 import time
+import textwrap
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
@@ -44,37 +45,26 @@ def analizar_ecg():
         except Exception as e:
             return {"error": f"Error base64: {str(e)}"}, 400
 
-    ecg_orig.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    ecg_orig.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
     w_orig, h_orig = ecg_orig.size
 
     prompt_maestro = (
-        "Analiza este ECG. Devuelve SOLO un JSON válido sin formato Markdown. Claves exactas: "
+        "Analiza este ECG. Devuelve SOLO un JSON válido. Claves exactas: "
         "'datos_tecnicos', 'lista_hallazgos' (array), 'etiologia', 'k_estimado', 'ca_estimado', "
-        "'manejo_sac', 'marcas' (array de objetos con x_porcentaje, y_porcentaje, tipo)."
+        "'manejo_sac', 'marcas' (array de objetos con x_porcentaje, y_porcentaje, tipo). "
+        "REGLA CRÍTICA DE MARCAS: Coordenadas (0-100) DEBEN LIMITARSE EXCLUSIVAMENTE a la zona del papel milimetrado. "
+        "Ignora fondos negros, mesas o bordes. Apunta exactamente sobre la anomalía."
     )
 
-    # AUTODESCUBRIMIENTO DE MODELOS: Busca qué modelos tenés habilitados realmente
-    modelos_autorizados = []
+    modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
     try:
-        print("Buscando modelos Flash autorizados para tu API key...", flush=True)
-        for m in client.models.list():
-            nombre = m.name.replace('models/', '')
-            if 'flash' in nombre.lower():
-                modelos_autorizados.append(nombre)
-        print(f"Modelos permitidos detectados: {modelos_autorizados}", flush=True)
-    except Exception as e:
-        print(f"Fallo listando modelos: {e}", flush=True)
-    
-    if not modelos_autorizados:
-        # Fallback de emergencia a modelos recientes
-        modelos_autorizados = ['gemini-2.0-flash', 'gemini-3.1-flash', 'gemini-2.5-flash']
+        mods = [m.name.replace('models/', '') for m in client.models.list() if 'flash' in m.name.lower()]
+        if mods: modelos_autorizados = mods
+    except: pass
 
     analisis_hallazgos = None
-    ultimo_error = ""
-
     for modelo in modelos_autorizados:
         try:
-            print(f"Llamando a {modelo}...", flush=True)
             response = client.models.generate_content(
                 model=modelo,
                 contents=[ecg_orig, prompt_maestro],
@@ -82,72 +72,97 @@ def analizar_ecg():
             )
             texto_limpio = response.text.replace("```json", "").replace("```", "").strip()
             analisis_hallazgos = json.loads(texto_limpio)
-            print(f"Éxito absoluto con {modelo}", flush=True)
             break
-        except Exception as e:
-            ultimo_error = str(e)
-            print(f"Fallo en {modelo}: {ultimo_error}", flush=True)
+        except Exception:
             time.sleep(1)
 
     if not analisis_hallazgos:
-        return {"error": f"IA falló en todos los modelos. Último error: {ultimo_error}"}, 500
+        return {"error": "IA falló en todos los modelos."}, 500
 
     try:
-        ancho_panel = 680
-        imagen_final = Image.new("RGB", (w_orig + ancho_panel, h_orig), color=(255, 255, 255))
-        imagen_final.paste(ecg_orig, (0, 0))
-        capa_overlay = Image.new("RGBA", (w_orig + ancho_panel, h_orig), (255, 255, 255, 0))
-        draw_overlay = ImageDraw.Draw(capa_overlay)
-        draw = ImageDraw.Draw(imagen_final)
+        ancho_panel = 920
+        col_w = 42  # Caracteres por línea para encastre compacto
         
+        datos_t = str(analisis_hallazgos.get("datos_tecnicos", "N/A"))
+        lista_h = analisis_hallazgos.get("lista_hallazgos", [])
+        if not isinstance(lista_h, list): lista_h = [str(lista_h)]
+        manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
+        
+        colores = {
+            'hvi': (220, 50, 50, 120),       
+            'conduccion': (50, 120, 220, 120), 
+            'onda_p': (220, 180, 50, 120),     
+            'st_t': (50, 180, 50, 120)         
+        }
+
         try:
-            f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
-            f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 10)
-            f_texto = ImageFont.truetype("DejaVuSans.ttf", 9)
+            f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+            f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
+            f_texto = ImageFont.truetype("DejaVuSans.ttf", 11)
         except:
             f_titulo = f_sub = f_texto = ImageFont.load_default()
 
-        col_x = w_orig + 15
-        y_actual = 12
-        draw.line([(w_orig, 0), (w_orig, h_orig)], fill=(210, 210, 210), width=1)
-        draw.text((col_x, y_actual), "RESEÑA CARDIOLÓGICA", fill=(15, 45, 95), font=f_titulo)
-        y_actual += 28
+        # Coordenadas de las 3 columnas
+        c1_x = w_orig + 15
+        c2_x = w_orig + 315
+        c3_x = w_orig + 615
 
-        def dibujar_seccion(y, titulo, lineas):
-            draw.text((col_x, y), titulo, fill=(20, 50, 90), font=f_sub)
-            y += 10
-            for item in lineas:
-                draw.text((col_x, y), f"• {str(item)}", fill=(40, 40, 40), font=f_texto)
-                y += 11
-            return y + 8
-
-        datos_t = str(analisis_hallazgos.get("datos_tecnicos", "N/A"))
-        lista_h = analisis_hallazgos.get("lista_hallazgos")
-        if not isinstance(lista_h, list): lista_h = [str(lista_h)] if lista_h else ["Sin hallazgos"]
+        alto_final = max(h_orig, 450)
+        img_final = Image.new("RGB", (w_orig + ancho_panel, alto_final), color=(248, 248, 250))
+        img_final.paste(ecg_orig, (0, 0))
         
-        y_actual = dibujar_seccion(y_actual, "DATOS Y HALLAZGOS:", [datos_t] + lista_h)
-        y_actual = dibujar_seccion(y_actual, "ETIOLOGÍA:", [str(analisis_hallazgos.get("etiologia", "N/A"))])
-        y_actual = dibujar_seccion(y_actual, "IONOGRAMA:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
-        dibujar_seccion(y_actual, "MANEJO:", str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n'))
+        c_overlay = Image.new("RGBA", img_final.size, (255, 255, 255, 0))
+        draw_ov = ImageDraw.Draw(c_overlay)
+        draw = ImageDraw.Draw(img_final)
 
-        colores = {'hvi': (178, 60, 60, 100), 'conduccion': (50, 120, 200, 100), 'onda_p': (200, 160, 30, 100), 'st_t': (50, 160, 50, 100)}
+        draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(200, 200, 200), width=1)
+        draw.text((c1_x, 15), "RESEÑA CARDIOLÓGICA PROFUNDA Y MANEJO CLÍNICO", fill=(20, 50, 100), font=f_titulo)
+        draw.line([(c1_x, 35), (w_orig + ancho_panel - 15, 35)], fill=(220, 220, 220), width=1)
+
+        def render_txt(x, y, titulo, lineas):
+            draw.text((x, y), titulo, fill=(40, 80, 140), font=f_sub)
+            y += 18
+            for item in lineas:
+                for p in textwrap.wrap(f"• {item}", width=col_w):
+                    draw.text((x, y), p, fill=(50, 50, 50), font=f_texto)
+                    y += 14
+            return y + 15
+
+        # Columna 1: Datos y Leyenda
+        y_c1 = render_txt(c1_x, 45, "DATOS TÉCNICOS:", [datos_t])
+        y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
+        
+        draw.text((c1_x, y_c1), "LEYENDA DE COLORES:", fill=(40, 80, 140), font=f_sub)
+        y_c1 += 18
+        for k, v in [('hvi', 'HVI / Sobrecarga'), ('conduccion', 'Trastorno Conducción'), ('onda_p', 'Anomalía Onda P'), ('st_t', 'Alteración ST-T')]:
+            draw_ov.ellipse([c1_x, y_c1+2, c1_x+10, y_c1+12], fill=colores.get(k))
+            draw.text((c1_x + 18, y_c1), v, fill=(50, 50, 50), font=f_texto)
+            y_c1 += 16
+
+        # Columna 2: Hallazgos
+        render_txt(c2_x, 45, "HALLAZGOS CLAVE:", lista_h)
+
+        # Columna 3: Etiología y Manejo
+        y_c3 = render_txt(c3_x, 45, "ETIOLOGÍA:", [str(analisis_hallazgos.get("etiologia", "N/A"))])
+        render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y TRATAMIENTO:", manejo)
+
+        # Marcas sobre ECG
         for m in analisis_hallazgos.get("marcas", []):
             try:
                 px = int(w_orig * (min(max(float(m.get("x_porcentaje", 50)), 0), 100) / 100.0))
                 py = int(h_orig * (min(max(float(m.get("y_porcentaje", 50)), 0), 100) / 100.0))
-                rgba = colores.get(str(m.get("tipo", "hvi")).lower(), (178, 60, 60, 100))
-                draw_overlay.ellipse([px-12, py-12, px+12, py+12], fill=rgba, outline=rgba)
+                rgba = colores.get(str(m.get("tipo", "hvi")).lower(), (220, 50, 50, 120))
+                draw_ov.ellipse([px-20, py-20, px+20, py+20], fill=rgba)
             except: continue
 
-        imagen_final = Image.alpha_composite(imagen_final.convert("RGBA"), capa_overlay).convert("RGB")
+        img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")
         buf = io.BytesIO()
-        imagen_final.save(buf, format="PNG", compress_level=0)
+        img_final.save(buf, format="PNG", compress_level=0)
         buf.seek(0)
         return send_file(buf, mimetype="image/png")
 
     except Exception as e:
-        print(f"Error renderizando imagen: {str(e)}", flush=True)
-        return {"error": f"Fallo al procesar imagen: {str(e)}"}, 500
+        return {"error": f"Error render: {str(e)}"}, 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

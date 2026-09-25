@@ -2,31 +2,29 @@ import io
 import os
 import base64
 import json
-from flask import Flask, request, send_file
+import requests
+from flask import Flask, request as req_flask, send_file
 from PIL import Image, ImageDraw, ImageFont
-import google.generativeai as genai
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 
-# Configuramos la API Key tomando cualquiera de las dos variables posibles en Render
-api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
-genai.configure(api_key=api_key)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG con Compatibilidad Total activa."
+    return "API de Procesamiento de ECG HTTP Directo activa."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    data = request.get_json(silent=True, force=True)
+    data = req_flask.get_json(silent=True, force=True)
     
     imagen_base64 = None
     if isinstance(data, dict):
         imagen_base64 = data.get("image") or data.get("Image")
     
     if not imagen_base64:
-        cuerpo_crudo = request.data.decode("utf-8", errors="ignore").strip()
+        cuerpo_crudo = req_flask.data.decode("utf-8", errors="ignore").strip()
         if cuerpo_crudo:
             imagen_base64 = (cuerpo_crudo
                              .replace('{"image":"', '')
@@ -74,17 +72,47 @@ def analizar_ecg():
 
     analisis_hallazgos = {}
     try:
-        print("Enviando imagen a Gemini con la librería clásica...")
-        # Usamos gemini-1.5-flash-latest para asegurar compatibilidad total en v1beta
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        response = model.generate_content(
-            [ecg_orig, prompt_maestro],
-            generation_config={"response_mime_type": "application/json", "temperature": 0.1}
-        )
-        print("Respuesta recibida:", response.text[:200])
-        analisis_hallazgos = json.loads(response.text)
+        print("Enviando imagen a Gemini mediante API REST directa...")
+        
+        buffered = io.BytesIO()
+        ecg_orig.save(buffered, format="JPEG")
+        img_b64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt_maestro},
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": img_b64_str
+                            }
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "temperature": 0.1
+            }
+        }
+
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if response.status_code != 200:
+            print("Error HTTP de Gemini:", response.text)
+            return {"error": f"Error API Gemini: {response.text}"}, 500
+
+        res_json = response.json()
+        texto_generado = res_json['candidates'][0]['content']['parts'][0]['text']
+        print("Respuesta OK de Gemini recibida con éxito")
+        analisis_hallazgos = json.loads(texto_generado)
+
     except Exception as e:
-        print("ERROR CRÍTICO LLAMANDO A GEMINI:", str(e))
+        print("ERROR CRÍTICO:", str(e))
         return {"error": f"Fallo en la IA: {str(e)}"}, 500
 
     ancho_panel = 680

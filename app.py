@@ -13,8 +13,8 @@ def home():
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    # Recibimos los datos en formato JSON enviados desde App Inventor
-    data = request.get_json(silent=True)
+    # Recibimos los datos en formato JSON (force=True asegura que lo lea aunque App Inventor no envíe cabeceras)
+    data = request.get_json(silent=True, force=True)
     if not data or "image" not in data:
         return {"error": "No se encontró la imagen en formato JSON"}, 400
     

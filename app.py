@@ -41,8 +41,21 @@ def analizar_ecg():
     except Exception as e:
         return {"error": "Error al decodificar Base64"}, 400
 
-    # --- TODO TU DISEÑO Y LÓGICA ORIGINAL INTACTOS ---
-    ecg_orig = Image.open(uploaded_file).convert("RGB")
+    try:
+        # --- TODO TU DISEÑO Y LÓGICA ORIGINAL INTACTOS ---
+        ecg_orig = Image.open(uploaded_file).convert("RGB")
+    except Exception as e:
+        # Intentamos limpiar prefijos comunes de data-URI si el Base64 venía con metadatos de tipo
+        try:
+            if b"," in image_data:
+                image_data = image_data.split(b",", 1)[1]
+                uploaded_file = io.BytesIO(image_data)
+                ecg_orig = Image.open(uploaded_file).convert("RGB")
+            else:
+                raise e
+        except Exception as e2:
+            return {"error": f"El contenido decodificado no es una imagen válida: {str(e2)}"}, 400
+
     w_orig, h_orig = ecg_orig.size
 
     ancho_panel = 1050

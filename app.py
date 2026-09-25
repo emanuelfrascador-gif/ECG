@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
 # Configurar el límite máximo de tamaño para archivos subidos (ej. 32 Megabytes)
-app.config['MAX_CONTENT_LENGTH'] = 40 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 @app.route("/", methods=["GET"])
 def home():
     return "API de Procesamiento de ECG funcionando correctamente."

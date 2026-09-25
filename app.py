@@ -13,14 +13,30 @@ def home():
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    # Recibimos los datos en formato JSON (force=True asegura que lo lea aunque App Inventor no envíe cabeceras)
+    # Extracción robusta anti-error 400 (soporta JSON estricto, texto plano o claves con variantes)
     data = request.get_json(silent=True, force=True)
-    if not data or "image" not in data:
-        return {"error": "No se encontró la imagen en formato JSON"}, 400
+    
+    imagen_base64 = None
+    if isinstance(data, dict):
+        imagen_base64 = data.get("image") or data.get("Image")
+    
+    if not imagen_base64:
+        cuerpo_crudo = request.data.decode("utf-8", errors="ignore").strip()
+        if cuerpo_crudo:
+            # Limpieza de posibles envoltorios si App Inventor mandó el texto crudo del unir
+            imagen_base64 = (cuerpo_crudo
+                             .replace('{"image":"', '')
+                             .replace('{"Image":"', '')
+                             .replace('image=', '')
+                             .rstrip('"}')
+                             .strip())
+
+    if not imagen_base64:
+        return {"error": "No se encontró la imagen en formato JSON o datos recibidos"}, 400
     
     try:
         # Decodificamos el string Base64 a bytes puros de imagen
-        image_data = base64.b64decode(data["image"])
+        image_data = base64.b64decode(imagen_base64)
         uploaded_file = io.BytesIO(image_data)
     except Exception as e:
         return {"error": "Error al decodificar Base64"}, 400

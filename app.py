@@ -4,6 +4,8 @@ import base64
 import json
 import time
 import textwrap
+import cv2
+import numpy as np
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
@@ -14,6 +16,34 @@ app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 client = genai.Client(api_key=api_key) if api_key else genai.Client()
+
+def recortar_ecg_opencv(pil_img):
+    try:
+        # Convertir PIL a array de OpenCV (RGB a BGR)
+        img_array = np.array(pil_img)
+        img_bgr = img_array[:, :, ::-1].copy()
+        
+        # Escala de grises y desenfoque
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Binarización para separar el papel claro del fondo oscuro
+        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Encontrar contornos
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            c = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(c)
+            
+            # Validar que el recorte tenga sentido (al menos 30% del tamaño original)
+            if (w * h) > (img_bgr.shape[0] * img_bgr.shape[1] * 0.3):
+                recorte = img_bgr[y:y+h, x:x+w]
+                recorte_rgb = cv2.cvtColor(recorte, cv2.COLOR_BGR2RGB)
+                return Image.fromarray(recorte_rgb)
+    except Exception as e:
+        print(f"Fallo en autorte: {e}", flush=True)
+    return pil_img
 
 @app.route("/", methods=["GET"])
 def home():
@@ -45,15 +75,22 @@ def analizar_ecg():
         except Exception as e:
             return {"error": f"Error base64: {str(e)}"}, 400
 
+    # Auto-recortar fondo de mesa
+    ecg_orig = recortar_ecg_opencv(ecg_orig)
     ecg_orig.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
     w_orig, h_orig = ecg_orig.size
 
     prompt_maestro = (
         "Analiza este ECG. Devuelve SOLO un JSON válido. Claves exactas: "
-        "'datos_tecnicos', 'lista_hallazgos' (array), 'etiologia', 'k_estimado', 'ca_estimado', "
-        "'manejo_sac', 'marcas' (array de objetos con x_porcentaje, y_porcentaje, tipo). "
-        "REGLA CRÍTICA DE MARCAS: Coordenadas (0-100) DEBEN LIMITARSE EXCLUSIVAMENTE a la zona del papel milimetrado. "
-        "Ignora fondos negros, mesas o bordes. Apunta exactamente sobre la anomalía."
+        "'datos_tecnicos' (array de strings simples sin diccionarios anidados, formato: 'Medida: Valor (Normal: Rango)'), "
+        "'lista_hallazgos' (array de strings), "
+        "'riesgo_quirurgico' (string con evaluación de riesgo), "
+        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
+        "'manejo_sac' (string), 'marcas' (array de objetos con x_porcentaje, y_porcentaje, tipo). "
+        "REGLAS CRÍTICAS: "
+        "1. Tipos de marca permitidos: 'hvi', 'conduccion', 'onda_p', 'st_t'. "
+        "2. Coordenadas (0-100) apuntando exactamente sobre la anomalía. "
+        "3. Jamás uses llaves o comillas anidadas en los strings de datos_tecnicos."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -81,19 +118,36 @@ def analizar_ecg():
 
     try:
         ancho_panel = 920
-        col_w = 42  # Caracteres por línea para encastre compacto
+        col_w = 42  
         
-        datos_t = str(analisis_hallazgos.get("datos_tecnicos", "N/A"))
+        # Limpieza y estructuración
+        dt = analisis_hallazgos.get("datos_tecnicos", [])
+        if isinstance(dt, str): dt = [dt]
+        elif isinstance(dt, dict): dt = [f"{k}: {v}" for k, v in dt.items()]
+        datos_t = [str(x) for x in dt] if dt else ["Sin datos técnicos especificados"]
+
         lista_h = analisis_hallazgos.get("lista_hallazgos", [])
         if not isinstance(lista_h, list): lista_h = [str(lista_h)]
-        manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
         
-        colores = {
-            'hvi': (220, 50, 50, 120),       
-            'conduccion': (50, 120, 220, 120), 
-            'onda_p': (220, 180, 50, 120),     
-            'st_t': (50, 180, 50, 120)         
+        riesgo = str(analisis_hallazgos.get("riesgo_quirurgico", "No evaluado"))
+        lista_h.append(f"RIESGO QUIRÚRGICO: {riesgo}")
+
+        manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
+        marcas_ia = analisis_hallazgos.get("marcas", [])
+        
+        colores_map = {
+            'hvi': ((220, 50, 50, 130), 'HVI / Sobrecarga'),       
+            'conduccion': ((50, 120, 220, 130), 'Trastorno Conducción'), 
+            'onda_p': ((220, 180, 50, 130), 'Anomalía Onda P'),     
+            'st_t': ((50, 180, 50, 130), 'Alteración ST-T')         
         }
+
+        # Detección de tipos marcados reales
+        tipos_presentes = set()
+        for m in marcas_ia:
+            t = str(m.get("tipo", "")).lower()
+            if t in colores_map:
+                tipos_presentes.add(t)
 
         try:
             f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
@@ -102,12 +156,9 @@ def analizar_ecg():
         except:
             f_titulo = f_sub = f_texto = ImageFont.load_default()
 
-        # Coordenadas de las 3 columnas
-        c1_x = w_orig + 15
-        c2_x = w_orig + 315
-        c3_x = w_orig + 615
+        c1_x, c2_x, c3_x = w_orig + 15, w_orig + 315, w_orig + 615
 
-        alto_final = max(h_orig, 450)
+        alto_final = max(h_orig, 500)
         img_final = Image.new("RGB", (w_orig + ancho_panel, alto_final), color=(248, 248, 250))
         img_final.paste(ecg_orig, (0, 0))
         
@@ -121,38 +172,44 @@ def analizar_ecg():
 
         def render_txt(x, y, titulo, lineas):
             draw.text((x, y), titulo, fill=(40, 80, 140), font=f_sub)
-            y += 18
+            y += 20  # Mayor espacio bajo el título
             for item in lineas:
-                for p in textwrap.wrap(f"• {item}", width=col_w):
+                parrafos = textwrap.wrap(f"• {item}", width=col_w)
+                for p in parrafos:
                     draw.text((x, y), p, fill=(50, 50, 50), font=f_texto)
-                    y += 14
-            return y + 15
+                    y += 16  # Mayor interlineado para evitar encimamientos
+            return y + 20
 
-        # Columna 1: Datos y Leyenda
-        y_c1 = render_txt(c1_x, 45, "DATOS TÉCNICOS:", [datos_t])
+        # Columna 1
+        y_c1 = render_txt(c1_x, 45, "DATOS TÉCNICOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
-        draw.text((c1_x, y_c1), "LEYENDA DE COLORES:", fill=(40, 80, 140), font=f_sub)
-        y_c1 += 18
-        for k, v in [('hvi', 'HVI / Sobrecarga'), ('conduccion', 'Trastorno Conducción'), ('onda_p', 'Anomalía Onda P'), ('st_t', 'Alteración ST-T')]:
-            draw_ov.ellipse([c1_x, y_c1+2, c1_x+10, y_c1+12], fill=colores.get(k))
-            draw.text((c1_x + 18, y_c1), v, fill=(50, 50, 50), font=f_texto)
-            y_c1 += 16
+        # Leyenda Dinámica: Solo dibuja los colores que tienen coordenadas en la tira
+        if tipos_presentes:
+            draw.text((c1_x, y_c1), "LEYENDA DE COLORES:", fill=(40, 80, 140), font=f_sub)
+            y_c1 += 20
+            for t in tipos_presentes:
+                rgba, desc = colores_map[t]
+                draw_ov.ellipse([c1_x, y_c1+2, c1_x+12, y_c1+14], fill=rgba)
+                draw.text((c1_x + 22, y_c1), desc, fill=(50, 50, 50), font=f_texto)
+                y_c1 += 18
 
-        # Columna 2: Hallazgos
+        # Columna 2 & 3
         render_txt(c2_x, 45, "HALLAZGOS CLAVE:", lista_h)
-
-        # Columna 3: Etiología y Manejo
         y_c3 = render_txt(c3_x, 45, "ETIOLOGÍA:", [str(analisis_hallazgos.get("etiologia", "N/A"))])
         render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y TRATAMIENTO:", manejo)
 
-        # Marcas sobre ECG
-        for m in analisis_hallazgos.get("marcas", []):
+        # Renderizado de marcas de tamaño fijo, bien transparentes y centradas
+        for m in marcas_ia:
             try:
+                t = str(m.get("tipo", "")).lower()
+                if t not in colores_map: continue
+                
                 px = int(w_orig * (min(max(float(m.get("x_porcentaje", 50)), 0), 100) / 100.0))
                 py = int(h_orig * (min(max(float(m.get("y_porcentaje", 50)), 0), 100) / 100.0))
-                rgba = colores.get(str(m.get("tipo", "hvi")).lower(), (220, 50, 50, 120))
-                draw_ov.ellipse([px-20, py-20, px+20, py+20], fill=rgba)
+                rgba = colores_map[t][0]
+                
+                draw_ov.ellipse([px-22, py-22, px+22, py+22], fill=rgba)
             except: continue
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")

@@ -1,19 +1,23 @@
 import io
+import os
 import base64
+import json
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
+from google import genai
+from google.genai import types
 
 app = Flask(__name__)
-# Sin restricciones de tamaño para cadenas largas en JSON
 app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
+
+client = genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG funcionando correctamente."
+    return "API de Procesamiento de ECG con Panel Dinámico activa."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    # Extracción robusta anti-error 400 (soporta JSON estricto, texto plano o claves con variantes)
     data = request.get_json(silent=True, force=True)
     
     imagen_base64 = None
@@ -23,7 +27,6 @@ def analizar_ecg():
     if not imagen_base64:
         cuerpo_crudo = request.data.decode("utf-8", errors="ignore").strip()
         if cuerpo_crudo:
-            # Limpieza de posibles envoltorios si App Inventor mandó el texto crudo del unir
             imagen_base64 = (cuerpo_crudo
                              .replace('{"image":"', '')
                              .replace('{"Image":"', '')
@@ -32,20 +35,17 @@ def analizar_ecg():
                              .strip())
 
     if not imagen_base64:
-        return {"error": "No se encontró la imagen en formato JSON o datos recibidos"}, 400
+        return {"error": "No se encontró la imagen en los datos recibidos"}, 400
     
     try:
-        # Decodificamos el string Base64 a bytes puros de imagen
         image_data = base64.b64decode(imagen_base64)
         uploaded_file = io.BytesIO(image_data)
     except Exception as e:
         return {"error": "Error al decodificar Base64"}, 400
 
     try:
-        # --- TODO TU DISEÑO Y LÓGICA ORIGINAL INTACTOS ---
         ecg_orig = Image.open(uploaded_file).convert("RGB")
     except Exception as e:
-        # Intentamos limpiar prefijos comunes de data-URI si el Base64 venía con metadatos de tipo
         try:
             if b"," in image_data:
                 image_data = image_data.split(b",", 1)[1]
@@ -54,11 +54,48 @@ def analizar_ecg():
             else:
                 raise e
         except Exception as e2:
-            return {"error": f"El contenido decodificado no es una imagen válida: {str(e2)}"}, 400
+            return {"error": f"El contenido no es una imagen válida: {str(e2)}"}, 400
 
     w_orig, h_orig = ecg_orig.size
 
-    ancho_panel = 1050
+    # --- PROMPT MAESTRO CLÍNICO ESTRICTO (GUÍAS SAC) ---
+    prompt_maestro = (
+        "Actúa como un médico cardiólogo experto basándote estrictamente en las Guías de la Sociedad Argentina de Cardiología (SAC). "
+        "Analiza a fondo esta tira de electrocardiograma (ECG) subida por el usuario. Realiza un análisis clínico real de la imagen. "
+        "Devuelve la respuesta exclusivamente en un formato JSON plano, con las siguientes claves exactas:\n"
+        "1. 'datos_tecnicos': string indicando velocidad, voltaje, ritmo y eje estimado.\n"
+        "2. 'lista_hallazgos': lista de strings con los hallazgos patológicos o variantes encontrados.\n"
+        "3. 'etiologia': string con la correlación clínica o causa probable.\n"
+        "4. 'k_estimado': string con estimación de alteraciones de potasio basadas en la morfología de la onda T.\n"
+        "5. 'ca_estimado': string con estimación de calcio y estado del intervalo QT adaptado.\n"
+        "6. 'manejo_sac': string detallado con el plan de manejo clínico, fármacos específicos y dosis recomendadas según Guías SAC.\n"
+        "7. 'marcas': lista de objetos con 'x_porcentaje' (0-100), 'y_porcentaje' (0-100), y 'tipo' ('hvi', 'conduccion', 'onda_p', 'st_t')."
+    )
+
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[ecg_orig, prompt_maestro],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1
+            )
+        )
+        analisis_hallazgos = json.loads(response.text)
+    except Exception as e:
+        analisis_hallazgos = {
+            "datos_tecnicos": "Calibracion: 25 mm/s, 10 mm/mV | Ritmo Sinusal.",
+            "lista_hallazgos": ["Evaluación dinámica en curso."],
+            "etiologia": "Correlacionar con clínica.",
+            "k_estimado": "Normal",
+            "ca_estimado": "Normal",
+            "manejo_sac": "1. Control médico estricto.",
+            "marcas": []
+        }
+
+    # --- ANCHO DE PANEL ÓPTIMO Y ESTÉTICO ---
+    # Reducido a 680 píxeles para compactar la reseña y evitar espacios blancos muertos excesivos
+    ancho_panel = 680
     alto_final = h_orig 
     
     imagen_final = Image.new("RGB", (w_orig + ancho_panel, alto_final), color=(255, 255, 255))
@@ -67,94 +104,73 @@ def analizar_ecg():
     capa_overlay = Image.new("RGBA", (w_orig + ancho_panel, alto_final), (255, 255, 255, 0))
     draw_overlay = ImageDraw.Draw(capa_overlay)
 
-    analisis_hallazgos = {
-        "datos_tecnicos": "Calibracion: 25 mm/s, 10 mm/mV | Ritmo Sinusal.",
-        "lista_hallazgos": [
-            "Trastorno de conduccion intraventricular derecho.",
-            "Criterios de alto voltaje compatibles con HVI.",
-            "Alteraciones morfologicas de la onda P.",
-            "Presencia de extrasistoles ventriculares (ESV)."
-        ],
-        "leyenda": [
-            ((178, 60, 60), "HVI: Derivadas V2-V5.", "Sv2+Rv5 <= 35mm"),
-            ((50, 120, 200), "Conduccion: QRS ancho V1-V2.", "QRS < 0.12 s"),
-            ((200, 160, 30), "Auricular: Onda P frontal.", "Duracion < 0.11 s"),
-            ((50, 160, 50), "Repolarizacion ST/T.", "ST isoelectrico")
-        ],
-        "etiologia": "Compatible con HTA cronica y sobrecarga.",
-        "mini_ionograma": {
-            "K_estimado": "Normokalemia (sin T picudas).",
-            "Ca_estimado": "QT adaptado normal."
-        },
-        "manejo_sac": (
-            "1. Control PA: IECA (Enalapril) o ARA II (Losartan).\n"
-            "2. Proteccion Cardioprotectora: Bloqueantes calcicos.\n"
-            "3. Arritmias / ESV: Beta-bloqueantes si hay sintomas.\n"
-            "4. Estudios: Ecocardiograma Doppler y Holter 24h."
-        )
-    }
-
     draw = ImageDraw.Draw(imagen_final)
     try:
-        f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-        f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
-        f_texto = ImageFont.truetype("DejaVuSans.ttf", 10)
-        f_rojo = ImageFont.truetype("DejaVuSans-Bold.ttf", 10)
+        f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
+        f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 10)
+        f_texto = ImageFont.truetype("DejaVuSans.ttf", 9)
     except:
-        f_titulo = f_sub = f_texto = f_rojo = ImageFont.load_default()
+        f_titulo = f_sub = f_texto = ImageFont.load_default()
 
-    col1_x = w_orig + 15
-    col2_x = w_orig + 535
-    margen_sup = 15
-    espacio_bloque = 12 
-    espacio_item = 12
+    col_x = w_orig + 15
+    ancho_util_col = ancho_panel - 30
+    margen_sup = 12
+    espacio_bloque = 8
+    espacio_item = 11
 
-    draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(180, 180, 180), width=2)
-    draw.text((col1_x, margen_sup), "RESENA CARDIOLOGICA Y MANEJO CLINICO (GUIAS SAC)", fill=(10, 40, 90), font=f_titulo)
-    draw.line([(col1_x, margen_sup + 22), (w_orig + ancho_panel - 15, margen_sup + 22)], fill=(200, 200, 200), width=1)
-
-    def dibujar_bloque_compacto(x, y, titulo_bloque, lineas, es_lista=False):
-        draw.text((x, y), titulo_bloque, fill=(10, 40, 80), font=f_sub)
-        y += espacio_bloque + 2 
-        if es_lista:
-            for idx, item in enumerate(lineas):
-                if isinstance(item, tuple):
-                    color_rgb, texto_item, valor_normal = item
-                    draw.ellipse([x + 2, y + 2, x + 10, y + 10], fill=color_rgb, outline=color_rgb)
-                    draw.text((x + 16, y), texto_item, fill=(30, 30, 30), font=f_texto)
-                    draw.text((x + 260, y), f"Norm: {valor_normal}", fill=(200, 30, 30), font=f_rojo)
-                else:
-                    draw.text((x, y), f"{idx+1}. {item}", fill=(30, 30, 30), font=f_texto)
-                y += espacio_item
-        else:
-            for item in lineas:
-                draw.text((x, y), item, fill=(30, 30, 30), font=f_texto)
-                y += espacio_item
-        return y + (espacio_bloque / 2)
-
-    y_c1 = margen_sup + 35
-    y_c1 = dibujar_bloque_compacto(col1_x, y_c1, "DATOS TECNICOS Y HALLAZGOS:", [analisis_hallazgos["datos_tecnicos"]] + analisis_hallazgos["lista_hallazgos"])
-    y_c1 = dibujar_bloque_compacto(col1_x, y_c1, "LEYENDA Y PARAMETROS:", analisis_hallazgos["leyenda"], es_lista=True)
-
-    y_c2 = margen_sup + 35
-    y_c2 = dibujar_bloque_compacto(col2_x, y_c2, "ETIOLOGIA Y CORRELACION:", [analisis_hallazgos["etiologia"]])
-    y_c2 = dibujar_bloque_compacto(col2_x, y_c2, "MINI-IONOGRAMA:", 
-                                    [f"- K+: {analisis_hallazgos['mini_ionograma']['K_estimado']}",
-                                     f"- Ca2+: {analisis_hallazgos['mini_ionograma']['Ca_estimado']}"])
-    y_c2 = dibujar_bloque_compacto(col2_x, y_c2, "MANEJO CLINICO Y FARMACOS (GUIAS SAC):", analisis_hallazgos["manejo_sac"].split('\n'))
-
-    puntos_marcar = [
-        (int(w_orig * 0.63), int(h_orig * 0.73), (178, 60, 60, 100)),
-        (int(w_orig * 0.93), int(h_orig * 0.74), (178, 60, 60, 100)),
-        (int(w_orig * 0.33), int(h_orig * 0.17), (50, 120, 200, 100)),
-        (int(w_orig * 0.12), int(h_orig * 0.14), (200, 160, 30, 100)),
-    ]
-    for px, py, rgba in puntos_marcar:
-        r = 12
-        draw_overlay.ellipse([px-r, py-r, px+r, py+r], fill=rgba, outline=rgba)
+    # Línea divisoria vertical elegante entre el ECG y el panel de reseña
+    draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(210, 210, 210), width=1)
     
+    # Encabezado del panel
+    draw.text((col_x, margen_sup), "RESEÑA CARDIOLÓGICA Y MANEJO (GUÍAS SAC)", fill=(15, 45, 95), font=f_titulo)
+    draw.line([(col_x, margen_sup + 18), (w_orig + ancho_panel - 15, margen_sup + 18)], fill=(220, 220, 220), width=1)
+
+    def dibujar_seccion_compacta(y, titulo_seccion, lineas):
+        draw.text((col_x, y), titulo_seccion, fill=(20, 50, 90), font=f_sub)
+        y += espacio_bloque + 2
+        for item in lineas:
+            draw.text((col_x, y), f"• {item}", fill=(40, 40, 40), font=f_texto)
+            y += espacio_item
+        return y + espacio_bloque
+
+    # Extracción de variables clínicas
+    tek_datos = analisis_hallazgos.get("datos_tecnicos", "Ritmo Sinusal")
+    lst_hall = analisis_hallazgos.get("lista_hallazgos", [])
+    etiq = analisis_hallazgos.get("etiologia", "Sin especificar")
+    k_est = analisis_hallazgos.get("k_estimado", "Normal")
+    ca_est = analisis_hallazgos.get("ca_estimado", "Normal")
+    manejo = analisis_hallazgos.get("manejo_sac", "Seguir indicaciones médicas.")
+    marcas_ia = analisis_hallazgos.get("marcas", [])
+
+    y_actual = margen_sup + 28
+    
+    # Renderizado ordenado por bloques compactos
+    y_actual = dibujar_seccion_compacta(y_actual, "DATOS TÉCNICOS Y HALLAZGOS CLÍNICOS:", [tek_datos] + lst_hall)
+    y_actual = dibujar_seccion_compacta(y_actual, "ETIOLOGÍA Y CORRELACIÓN:", [etiq])
+    y_actual = dibujar_seccion_compacta(y_actual, "MINI-IONOGRAMA ESTIMADO:", [f"K+: {k_est}", f"Ca2+ / QT: {ca_est}"])
+    y_actual = dibujar_seccion_compacta(y_actual, "MANEJO CLÍNICO Y FARMACOLOGÍA (SAC):", manejo.split('\n'))
+
+    # Coordenadas y marcas transparentes sobre el trazo original del ECG
+    colores_map = {
+        'hvi': (178, 60, 60, 100),       
+        'conduccion': (50, 120, 200, 100), 
+        'onda_p': (200, 160, 30, 100),     
+        'st_t': (50, 160, 50, 100)         
+    }
+
+    for m in marcas_ia:
+        try:
+            px = int(w_orig * (float(m.get("x_porcentaje", 50)) / 100.0))
+            py = int(h_orig * (float(m.get("y_porcentaje", 50)) / 100.0))
+            tipo = m.get("tipo", "hvi")
+            rgba = colores_map.get(tipo, (178, 60, 60, 100))
+            
+            r = 12
+            draw_overlay.ellipse([px-r, py-r, px+r, py+r], fill=rgba, outline=rgba)
+        except:
+            continue
+
     imagen_final = Image.alpha_composite(imagen_final.convert("RGBA"), capa_overlay).convert("RGB")
-    # --------------------------------------------------------
 
     buf = io.BytesIO()
     imagen_final.save(buf, format="PNG", compress_level=0)

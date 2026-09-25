@@ -14,7 +14,7 @@ client = genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG con Marcas Exactas y Dosis SAC activa."
+    return "API de Procesamiento con IA Real Activa."
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -54,25 +54,27 @@ def analizar_ecg():
             else:
                 raise e
         except Exception as e2:
-            return {"error": f"El contenido no es una imagen válida: {str(e2)}"}, 400
+            return {"error": f"Imagen no válida: {str(e2)}"}, 400
 
     w_orig, h_orig = ecg_orig.size
 
-    # --- PROMPT MAESTRO CON NOMBRES DE FÁRMACOS, DOSIS EXACTAS Y COORDENADAS SOBRE LA LÍNEA ---
+    # --- LLAMADA REAL A LA IA CON PROMPT MAESTRO SAC ---
     prompt_maestro = (
-        "Actúa como un médico cardiólogo experto basándote estrictamente en las Guías de la Sociedad Argentina de Cardiología (SAC). "
-        "Analiza a fondo esta tira de electrocardiograma (ECG). "
-        "Devuelve la respuesta exclusivamente en un formato JSON plano, con las siguientes claves exactas:\n"
-        "1. 'datos_tecnicos': string indicando velocidad (25 mm/s), voltaje (10 mm/mV), ritmo y eje estimado.\n"
-        "2. 'lista_hallazgos': lista de strings con los hallazgos patológicos detallados.\n"
-        "3. 'etiologia': string con la correlación clínica o causa probable según los hallazgos.\n"
-        "4. 'k_estimado': string con estimación de potasio basada en la onda T.\n"
-        "5. 'ca_estimado': string con estimación de calcio y QT.\n"
-        "6. 'manejo_sac': string detallado indicando **nombres específicos de medicamentos** (ej. Enalapril, Losartán, Bisoprolol, Espironolactona) junto con sus **dosis exactas recomendadas** (ej. 10 mg/día) según las normativas de la SAC.\n"
-        "7. 'marcas': lista de objetos con 'x_porcentaje' (0-100 horizontal exacto del hallazgo en la tira), 'y_porcentaje' (0-100 vertical exacto sobre la línea del trazo), y 'tipo' ('hvi', 'conduccion', 'onda_p', 'st_t')."
+        "Actúa como un médico cardiólogo experto bajo Guías de la Sociedad Argentina de Cardiología (SAC). "
+        "Analiza esta tira de ECG real. "
+        "Devuelve la respuesta estrictamente en un JSON plano con estas claves exactas:\n"
+        "1. 'datos_tecnicos': string con calibración, ritmo y eje.\n"
+        "2. 'lista_hallazgos': lista de strings con hallazgos reales de esta imagen.\n"
+        "3. 'etiologia': string con correlación clínica.\n"
+        "4. 'k_estimado': string con estado del potasio según ondas T.\n"
+        "5. 'ca_estimado': string con estado del calcio y QT.\n"
+        "6. 'manejo_sac': string con nombres de fármacos específicos y dosis exactas (ej: Enalapril 10 mg/día) según SAC.\n"
+        "7. 'marcas': lista de objetos con 'x_porcentaje' (0-100), 'y_porcentaje' (0-100) exactos de las alteraciones sobre el trazo, y 'tipo' ('hvi', 'conduccion', 'onda_p', 'st_t')."
     )
 
+    analisis_hallazgos = {}
     try:
+        print("Enviando imagen a Gemini para análisis clínico real...")
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[ecg_orig, prompt_maestro],
@@ -81,17 +83,11 @@ def analizar_ecg():
                 temperature=0.1
             )
         )
+        print("Respuesta recibida de Gemini:", response.text[:200])
         analisis_hallazgos = json.loads(response.text)
     except Exception as e:
-        analisis_hallazgos = {
-            "datos_tecnicos": "Calibracion: 25 mm/s, 10 mm/mV | Ritmo Sinusal.",
-            "lista_hallazgos": ["Evaluación en curso."],
-            "etiologia": "Correlacionar con clínica.",
-            "k_estimado": "K+ Normal",
-            "ca_estimado": "QT Normal",
-            "manejo_sac": "1. Enalapril 5 mg c/12 hs.\n2. Bisoprolol 2.5 mg/día.",
-            "marcas": []
-        }
+        print("ERROR CRÍTICO LLAMANDO A GEMINI:", str(e))
+        return {"error": f"Fallo en la IA: {str(e)}"}, 500
 
     ancho_panel = 680
     alto_final = h_orig 
@@ -141,7 +137,6 @@ def analizar_ecg():
     y_actual = dibujar_seccion_compacta(y_actual, "MINI-IONOGRAMA ESTIMADO:", [f"K+: {k_est}", f"Ca2+ / QT: {ca_est}"])
     y_actual = dibujar_seccion_compacta(y_actual, "MANEJO CLÍNICO Y FARMACOLOGÍA (SAC):", manejo.split('\n'))
 
-    # Coordenadas y marcas transparentes posicionadas milimétricamente SOBRE la línea exacta del trazo
     colores_map = {
         'hvi': (178, 60, 60, 100),       
         'conduccion': (50, 120, 200, 100), 
@@ -159,7 +154,6 @@ def analizar_ecg():
             if y_pct > 100: y_pct = 100
             if y_pct < 0: y_pct = 0
 
-            # Posición exacta calculada sobre la línea sin offsets artificiales
             px = int(w_orig * (x_pct / 100.0))
             py = int(h_orig * (y_pct / 100.0))
 

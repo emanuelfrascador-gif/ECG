@@ -57,21 +57,21 @@ def analizar_ecg():
     prompt_maestro = (
         "Actúa como un Cardiólogo Especialista Avanzado. Analiza minuciosamente este ECG. "
         "REGLAS CLÍNICAS CRÍTICAS: "
-        "1. Ignora cualquier texto, nombre o dato escrito en el papel. Analiza exclusivamente las derivaciones. "
-        "2. Razona cruzando información de todas las derivaciones para confirmar hallazgos. No te bases en una sola. "
-        "3. Los ECG tienen artefactos. Si dudas por interferencia, clasifícalo como 'sospecha a confirmar'. "
-        "4. No culmines en un solo diagnóstico; enumera diagnósticos diferenciales si hay más de una posibilidad. "
+        "1. Ignora texto escrito a mano. Analiza solo derivaciones. "
+        "2. Razona cruzando información de todas las derivaciones. "
+        "3. Si dudas por interferencia, pon 'sospecha a confirmar'. "
+        "4. Enumera diagnósticos diferenciales si corresponde. "
         "Devuelve SOLO un JSON válido. Claves exactas: "
-        "'datos_tecnicos' (array strings: 'Medida: Valor (Normal: Rango)'), "
+        "'datos_tecnicos' (array strings), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
-        "'etiologia' (string con diagnósticos diferenciales), 'k_estimado' (string), 'ca_estimado' (string), "
-        "'manejo_sac' (string. OBLIGATORIO: Si recomiendas terapéutica como antiagregación, isquemia, etc., DEBES SEÑALAR LOS FÁRMACOS Y DOSIS RECOMENDADAS según guías SAC/SAE), "
-        "'marcas' (array de objetos con x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS (EXHAUSTIVIDAD ABSOLUTA - MUY IMPORTANTE): "
-        "1. OBLIGATORIO: Marca TODAS Y CADA UNA de las alteraciones que veas en TODO el trazado. Sé minucioso. "
-        "2. Si un hallazgo (ej. onda T invertida, infradesnivel, supra, extrasístole) se repite en MÚLTIPLES latidos o en MÚLTIPLES derivaciones contiguas (ej. de V1 a V6), DEBES generar una coordenada independiente para CADA latido o derivación afectada. Prohibido agrupar o marcar solo una de ejemplo. Deben haber decenas de marcas si la alteración es difusa. "
-        "3. 'nivel_riesgo' DEBE ser exacto uno de estos: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'. "
-        "4. Coordenadas apuntando exactamente encima del trazo de la anomalía."
+        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
+        "'manejo_sac' (string: detalla fármacos y dosis según guías SAC/SAE), "
+        "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
+        "REGLAS DE MARCAS (EXHAUSTIVIDAD OBLIGATORIA - NO OMITAS NADA): "
+        "1. CORRELACIÓN 1 A 1: Cada anomalía mencionada en 'lista_hallazgos' DEBE tener OBLIGATORIAMENTE marcas en el array 'marcas'. No seas perezoso, marca todo lo que describas. "
+        "2. REGLA DE UBICACIÓN (1 MARCA POR DERIVACIÓN): Si una alteración aparece en varias derivaciones (ej. infradesnivel en V2, V3 y V4), crea exactamente UNA marca en V2, UNA en V3 y UNA en V4. Selecciona un solo latido representativo por derivación. PROHIBIDO marcar todos los latidos de una misma derivación, márcalo solo 1 vez por derivación afectada. "
+        "3. 'nivel_riesgo' DEBE ser exactamente: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'. "
+        "4. Coordenadas (0-100) exactas sobre el trazo."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -136,7 +136,7 @@ def analizar_ecg():
                 h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
             return h + (20 * escala)
 
-        h_c1 = (45*escala) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 45 * escala) + (40*escala)
+        h_c1 = (45*escala) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
         h_c2 = (45*escala) + calc_y(lista_h)
         h_c3 = (45*escala) + calc_y([str(analisis_hallazgos.get("etiologia", ""))]) + calc_y(manejo)
 
@@ -181,16 +181,16 @@ def analizar_ecg():
             y_c1 += int(20 * escala)
             for r, desc_list in tipos_presentes.items():
                 rgba, desc_base = colores_riesgo[r]
-                txt_leyenda = f"{desc_base}: {', '.join(desc_list[:2])}" if desc_list else desc_base
+                # Ahora mostramos TODAS las descripciones asociadas a este nivel de riesgo, sin cortar.
+                txt_leyenda = f"{desc_base}: {', '.join(desc_list)}" if desc_list else desc_base
                 
-                # Tamaño de la muestra en la leyenda acorde al nuevo tamaño más chico
                 r_size = int(10 * escala)
                 draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=rgba)
                 
                 for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
                     draw.text((c1_x + int(22 * escala), y_c1), p, fill=(50, 50, 50), font=f_texto)
                     y_c1 += int(16 * escala)
-                y_c1 += int(8 * escala)
+                y_c1 += int(12 * escala) # Espacio extra entre diferentes niveles de riesgo
 
         render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE:", lista_h)
         y_c3 = render_txt(c3_x, int(45 * escala), "ETIOLOGÍA (Diferenciales):", [str(analisis_hallazgos.get("etiologia", "N/A"))])
@@ -203,7 +203,7 @@ def analizar_ecg():
                 px = int(w_orig * (min(max(float(m.get("x_porcentaje", 50)), 0), 100) / 100.0))
                 py = int(h_orig * (min(max(float(m.get("y_porcentaje", 50)), 0), 100) / 100.0))
                 
-                # Se redujo casi a la mitad (12 en vez de 22) para mayor precisión.
+                # Tamaño de la marca reducido y transparente como lo pediste
                 rad = int(12 * escala)
                 draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], fill=colores_riesgo[r][0])
             except: continue

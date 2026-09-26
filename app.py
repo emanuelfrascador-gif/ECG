@@ -52,7 +52,6 @@ def analizar_ecg():
     if not ecg_orig:
         return {"error": "No se recibió ninguna imagen válida."}, 400
 
-    # SE ELIMINÓ LA COMPRESIÓN. LA IMAGEN PASA EN CALIDAD ORIGINAL 100%.
     w_orig, h_orig = ecg_orig.size
 
     prompt_maestro = (
@@ -68,10 +67,11 @@ def analizar_ecg():
         "'etiologia' (string con diagnósticos diferenciales), 'k_estimado' (string), 'ca_estimado' (string), "
         "'manejo_sac' (string. OBLIGATORIO: Si recomiendas terapéutica como antiagregación, isquemia, etc., DEBES SEÑALAR LOS FÁRMACOS Y DOSIS RECOMENDADAS según guías SAC/SAE), "
         "'marcas' (array de objetos con x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS: "
-        "1. Marca TODAS las alteraciones posibles simultáneamente. "
-        "2. 'nivel_riesgo' DEBE ser exacto uno de estos: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'. "
-        "3. Coordenadas apuntando exactamente a la anomalía."
+        "REGLAS DE MARCAS (EXHAUSTIVIDAD ABSOLUTA - MUY IMPORTANTE): "
+        "1. OBLIGATORIO: Marca TODAS Y CADA UNA de las alteraciones que veas en TODO el trazado. Sé minucioso. "
+        "2. Si un hallazgo (ej. onda T invertida, infradesnivel, supra, extrasístole) se repite en MÚLTIPLES latidos o en MÚLTIPLES derivaciones contiguas (ej. de V1 a V6), DEBES generar una coordenada independiente para CADA latido o derivación afectada. Prohibido agrupar o marcar solo una de ejemplo. Deben haber decenas de marcas si la alteración es difusa. "
+        "3. 'nivel_riesgo' DEBE ser exacto uno de estos: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'. "
+        "4. Coordenadas apuntando exactamente encima del trazo de la anomalía."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -97,11 +97,9 @@ def analizar_ecg():
         return {"error": "IA falló en todos los modelos."}, 500
 
     try:
-        # Escalamiento dinámico para que la grilla y la letra no queden microscópicas 
-        # frente a fotos de celulares de 12 o 48 Megapíxeles sin comprimir.
         escala = max(1.0, w_orig / 1200.0)
         ancho_panel = int(920 * escala)
-        col_w = int(42) # Mantener ancho de caracteres, escalar la fuente
+        col_w = int(42)
         
         dt = analisis_hallazgos.get("datos_tecnicos", [])
         datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
@@ -114,11 +112,11 @@ def analizar_ecg():
         
         # Mapeo de Colores por Severidad (Rojo, Morado, Amarillo, Verde, Azul)
         colores_riesgo = {
-            'critico': ((220, 30, 30, 130), 'Riesgo Crítico'),        # Rojo
-            'alto': ((148, 0, 211, 130), 'Riesgo Alto'),              # Morado
-            'moderado': ((220, 200, 30, 130), 'Riesgo Moderado'),     # Amarillo
-            'bajo': ((30, 200, 30, 130), 'Riesgo Bajo'),              # Verde
-            'indeterminado': ((30, 100, 220, 130), 'A Confirmar / Artefacto') # Azul
+            'critico': ((220, 30, 30, 130), 'Riesgo Crítico'),
+            'alto': ((148, 0, 211, 130), 'Riesgo Alto'),
+            'moderado': ((220, 200, 30, 130), 'Riesgo Moderado'),
+            'bajo': ((30, 200, 30, 130), 'Riesgo Bajo'),
+            'indeterminado': ((30, 100, 220, 130), 'A Confirmar / Artefacto')
         }
 
         tipos_presentes = {}
@@ -185,8 +183,8 @@ def analizar_ecg():
                 rgba, desc_base = colores_riesgo[r]
                 txt_leyenda = f"{desc_base}: {', '.join(desc_list[:2])}" if desc_list else desc_base
                 
-                # Círculos de color redimensionados para altas resoluciones
-                r_size = int(12 * escala)
+                # Tamaño de la muestra en la leyenda acorde al nuevo tamaño más chico
+                r_size = int(10 * escala)
                 draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=rgba)
                 
                 for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
@@ -205,8 +203,8 @@ def analizar_ecg():
                 px = int(w_orig * (min(max(float(m.get("x_porcentaje", 50)), 0), 100) / 100.0))
                 py = int(h_orig * (min(max(float(m.get("y_porcentaje", 50)), 0), 100) / 100.0))
                 
-                # Tamaño de marca dinámico proporcional a la resolución original
-                rad = int(22 * escala)
+                # Se redujo casi a la mitad (12 en vez de 22) para mayor precisión.
+                rad = int(12 * escala)
                 draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], fill=colores_riesgo[r][0])
             except: continue
 

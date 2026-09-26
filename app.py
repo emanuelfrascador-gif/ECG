@@ -21,43 +21,57 @@ def home():
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    data = request.get_json(silent=True, force=True)
-    imagen_base64 = data.get("image") or data.get("Image") if isinstance(data, dict) else None
+    ecg_orig = None
     
-    if not imagen_base64:
-        cuerpo_crudo = request.data.decode("utf-8", errors="ignore").strip()
-        if cuerpo_crudo:
-            imagen_base64 = cuerpo_crudo.replace('{"image":"', '').replace('{"Image":"', '').replace('image=', '').rstrip('"}').strip()
-
-    if not imagen_base64:
-        return {"error": "No se encontró imagen"}, 400
-    
+    data_cruda = request.get_data()
     try:
-        image_data = base64.b64decode(imagen_base64)
-        ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
+        if data_cruda:
+            ecg_orig = Image.open(io.BytesIO(data_cruda)).convert("RGB")
     except Exception:
-        try:
-            if b"," in image_data:
-                image_data = image_data.split(b",", 1)[1]
-                ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
-            else:
-                return {"error": "Formato inválido"}, 400
-        except Exception as e:
-            return {"error": f"Error base64: {str(e)}"}, 400
+        pass
 
-    ecg_orig.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+    if not ecg_orig:
+        try:
+            data = request.get_json(silent=True, force=True)
+            imagen_base64 = data.get("image") or data.get("Image") if isinstance(data, dict) else None
+            
+            if not imagen_base64:
+                cuerpo_crudo = data_cruda.decode("utf-8", errors="ignore").strip()
+                imagen_base64 = cuerpo_crudo.replace('{"image":"', '').replace('{"Image":"', '').replace('image=', '').rstrip('"}').strip()
+
+            image_data = base64.b64decode(imagen_base64)
+            ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
+        except Exception:
+            try:
+                if b"," in image_data:
+                    image_data = image_data.split(b",", 1)[1]
+                    ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
+            except Exception as e:
+                return {"error": f"Error al procesar imagen: {str(e)}"}, 400
+
+    if not ecg_orig:
+        return {"error": "No se recibió ninguna imagen válida."}, 400
+
+    # SE ELIMINÓ LA COMPRESIÓN. LA IMAGEN PASA EN CALIDAD ORIGINAL 100%.
     w_orig, h_orig = ecg_orig.size
 
     prompt_maestro = (
-        "Analiza este ECG. Devuelve SOLO un JSON válido. Claves exactas: "
-        "'datos_tecnicos' (array de strings, formato 'Medida: Valor (Normal: Rango)'), "
+        "Actúa como un Cardiólogo Especialista Avanzado. Analiza minuciosamente este ECG. "
+        "REGLAS CLÍNICAS CRÍTICAS: "
+        "1. Ignora cualquier texto, nombre o dato escrito en el papel. Analiza exclusivamente las derivaciones. "
+        "2. Razona cruzando información de todas las derivaciones para confirmar hallazgos. No te bases en una sola. "
+        "3. Los ECG tienen artefactos. Si dudas por interferencia, clasifícalo como 'sospecha a confirmar'. "
+        "4. No culmines en un solo diagnóstico; enumera diagnósticos diferenciales si hay más de una posibilidad. "
+        "Devuelve SOLO un JSON válido. Claves exactas: "
+        "'datos_tecnicos' (array strings: 'Medida: Valor (Normal: Rango)'), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
-        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
-        "'manejo_sac' (string), 'marcas' (array de objetos con x_porcentaje, y_porcentaje, tipo, descripcion_breve). "
-        "REGLAS CRÍTICAS: "
-        "1. 'tipo' solo puede ser: 'hvi', 'conduccion', 'onda_p', 'st_t'. "
-        "2. 'descripcion_breve' debe indicar la alteración exacta (ej: 'Infradesnivel ST 2mm', 'Onda P Mitral'). "
-        "3. Coordenadas apuntando sobre la anomalía en el papel milimetrado."
+        "'etiologia' (string con diagnósticos diferenciales), 'k_estimado' (string), 'ca_estimado' (string), "
+        "'manejo_sac' (string. OBLIGATORIO: Si recomiendas terapéutica como antiagregación, isquemia, etc., DEBES SEÑALAR LOS FÁRMACOS Y DOSIS RECOMENDADAS según guías SAC/SAE), "
+        "'marcas' (array de objetos con x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
+        "REGLAS DE MARCAS: "
+        "1. Marca TODAS las alteraciones posibles simultáneamente. "
+        "2. 'nivel_riesgo' DEBE ser exacto uno de estos: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'. "
+        "3. Coordenadas apuntando exactamente a la anomalía."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -83,8 +97,11 @@ def analizar_ecg():
         return {"error": "IA falló en todos los modelos."}, 500
 
     try:
-        ancho_panel = 920
-        col_w = 42  
+        # Escalamiento dinámico para que la grilla y la letra no queden microscópicas 
+        # frente a fotos de celulares de 12 o 48 Megapíxeles sin comprimir.
+        escala = max(1.0, w_orig / 1200.0)
+        ancho_panel = int(920 * escala)
+        col_w = int(42) # Mantener ancho de caracteres, escalar la fuente
         
         dt = analisis_hallazgos.get("datos_tecnicos", [])
         datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
@@ -94,33 +111,36 @@ def analizar_ecg():
         manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
         
         marcas_ia = analisis_hallazgos.get("marcas", [])
-        colores_map = {
-            'hvi': ((220, 50, 50, 130), 'HVI / Sobrecarga'),       
-            'conduccion': ((50, 120, 220, 130), 'Conducción'), 
-            'onda_p': ((220, 180, 50, 130), 'Anomalía Onda P'),     
-            'st_t': ((50, 180, 50, 130), 'Alteración ST-T')         
+        
+        # Mapeo de Colores por Severidad (Rojo, Morado, Amarillo, Verde, Azul)
+        colores_riesgo = {
+            'critico': ((220, 30, 30, 130), 'Riesgo Crítico'),        # Rojo
+            'alto': ((148, 0, 211, 130), 'Riesgo Alto'),              # Morado
+            'moderado': ((220, 200, 30, 130), 'Riesgo Moderado'),     # Amarillo
+            'bajo': ((30, 200, 30, 130), 'Riesgo Bajo'),              # Verde
+            'indeterminado': ((30, 100, 220, 130), 'A Confirmar / Artefacto') # Azul
         }
 
         tipos_presentes = {}
         for m in marcas_ia:
-            t = str(m.get("tipo", "")).lower()
-            desc = str(m.get("descripcion_breve", "")).strip()
-            if t in colores_map:
-                if t not in tipos_presentes:
-                    tipos_presentes[t] = []
-                if desc and desc not in tipos_presentes[t]:
-                    tipos_presentes[t].append(desc)
+            r = str(m.get("nivel_riesgo", "indeterminado")).lower()
+            if r not in colores_riesgo: r = 'indeterminado'
+            desc = str(m.get("descripcion_breve", "Alteración")).strip()
+            
+            if r not in tipos_presentes:
+                tipos_presentes[r] = []
+            if desc and desc not in tipos_presentes[r]:
+                tipos_presentes[r].append(desc)
 
-        # Cálculo dinámico exacto de altura
         def calc_y(lineas):
-            h = 20
+            h = 20 * escala
             for item in lineas:
-                h += len(textwrap.wrap(f"• {item}", width=col_w)) * 16
-            return h + 20
+                h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
+            return h + (20 * escala)
 
-        h_c1 = 45 + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 45) + 40
-        h_c2 = 45 + calc_y(lista_h)
-        h_c3 = 45 + calc_y([str(analisis_hallazgos.get("etiologia", ""))]) + calc_y(manejo)
+        h_c1 = (45*escala) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 45 * escala) + (40*escala)
+        h_c2 = (45*escala) + calc_y(lista_h)
+        h_c3 = (45*escala) + calc_y([str(analisis_hallazgos.get("etiologia", ""))]) + calc_y(manejo)
 
         alto_final = int(max(h_orig, h_c1, h_c2, h_c3))
         
@@ -132,52 +152,62 @@ def analizar_ecg():
         draw = ImageDraw.Draw(img_final)
 
         try:
-            f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-            f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
-            f_texto = ImageFont.truetype("DejaVuSans.ttf", 11)
+            f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", int(16 * escala))
+            f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", int(12 * escala))
+            f_texto = ImageFont.truetype("DejaVuSans.ttf", int(11 * escala))
         except:
             f_titulo = f_sub = f_texto = ImageFont.load_default()
 
-        c1_x, c2_x, c3_x = w_orig + 15, w_orig + 315, w_orig + 615
-        draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(200, 200, 200), width=1)
-        draw.text((c1_x, 15), "RESEÑA CARDIOLÓGICA PROFUNDA Y MANEJO CLÍNICO", fill=(20, 50, 100), font=f_titulo)
-        draw.line([(c1_x, 35), (w_orig + ancho_panel - 15, 35)], fill=(220, 220, 220), width=1)
+        c1_x = int(w_orig + (15 * escala))
+        c2_x = int(w_orig + (315 * escala))
+        c3_x = int(w_orig + (615 * escala))
+        
+        draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(200, 200, 200), width=int(max(1, escala)))
+        draw.text((c1_x, int(15 * escala)), "RESEÑA CARDIOLÓGICA PROFUNDA Y MANEJO CLÍNICO", fill=(20, 50, 100), font=f_titulo)
+        draw.line([(c1_x, int(35 * escala)), (w_orig + ancho_panel - int(15 * escala), int(35 * escala))], fill=(220, 220, 220), width=int(max(1, escala)))
 
         def render_txt(x, y, titulo, lineas):
             draw.text((x, y), titulo, fill=(40, 80, 140), font=f_sub)
-            y += 20  
+            y += int(20 * escala)
             for item in lineas:
                 for p in textwrap.wrap(f"• {item}", width=col_w):
                     draw.text((x, y), p, fill=(50, 50, 50), font=f_texto)
-                    y += 16  
-            return y + 20
+                    y += int(16 * escala)
+            return y + int(20 * escala)
 
-        y_c1 = render_txt(c1_x, 45, "DATOS TÉCNICOS:", datos_t)
+        y_c1 = render_txt(c1_x, int(45 * escala), "DATOS TÉCNICOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
         if tipos_presentes:
             draw.text((c1_x, y_c1), "LEYENDA DE COLORES:", fill=(40, 80, 140), font=f_sub)
-            y_c1 += 20
-            for t, desc_list in tipos_presentes.items():
-                rgba, desc_base = colores_map[t]
+            y_c1 += int(20 * escala)
+            for r, desc_list in tipos_presentes.items():
+                rgba, desc_base = colores_riesgo[r]
                 txt_leyenda = f"{desc_base}: {', '.join(desc_list[:2])}" if desc_list else desc_base
-                draw_ov.ellipse([c1_x, y_c1+2, c1_x+12, y_c1+14], fill=rgba)
+                
+                # Círculos de color redimensionados para altas resoluciones
+                r_size = int(12 * escala)
+                draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=rgba)
+                
                 for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
-                    draw.text((c1_x + 22, y_c1), p, fill=(50, 50, 50), font=f_texto)
-                    y_c1 += 16
-                y_c1 += 8
+                    draw.text((c1_x + int(22 * escala), y_c1), p, fill=(50, 50, 50), font=f_texto)
+                    y_c1 += int(16 * escala)
+                y_c1 += int(8 * escala)
 
-        render_txt(c2_x, 45, "HALLAZGOS CLAVE:", lista_h)
-        y_c3 = render_txt(c3_x, 45, "ETIOLOGÍA:", [str(analisis_hallazgos.get("etiologia", "N/A"))])
-        render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y TRATAMIENTO:", manejo)
+        render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE:", lista_h)
+        y_c3 = render_txt(c3_x, int(45 * escala), "ETIOLOGÍA (Diferenciales):", [str(analisis_hallazgos.get("etiologia", "N/A"))])
+        render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y FÁRMACOS (Guías SAC/SAE):", manejo)
 
         for m in marcas_ia:
             try:
-                t = str(m.get("tipo", "")).lower()
-                if t not in colores_map: continue
+                r = str(m.get("nivel_riesgo", "indeterminado")).lower()
+                if r not in colores_riesgo: r = 'indeterminado'
                 px = int(w_orig * (min(max(float(m.get("x_porcentaje", 50)), 0), 100) / 100.0))
                 py = int(h_orig * (min(max(float(m.get("y_porcentaje", 50)), 0), 100) / 100.0))
-                draw_ov.ellipse([px-22, py-22, px+22, py+22], fill=colores_map[t][0])
+                
+                # Tamaño de marca dinámico proporcional a la resolución original
+                rad = int(22 * escala)
+                draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], fill=colores_riesgo[r][0])
             except: continue
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")

@@ -17,12 +17,15 @@ client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa."
+    return "API de Procesamiento de ECG Activa - Nivel Especialista (Cadena Única)"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    ecg_orig = None
+    # 1. ATRAPAR LA CADENA ÚNICA ENVIADA DESDE APP INVENTOR
+    datos_paciente = request.args.get('datos', 'Paciente sin datos clínicos proporcionados.')
     
+    # 2. PROCESAR LA IMAGEN
+    ecg_orig = None
     data_cruda = request.get_data()
     try:
         if data_cruda:
@@ -34,11 +37,9 @@ def analizar_ecg():
         try:
             data = request.get_json(silent=True, force=True)
             imagen_base64 = data.get("image") or data.get("Image") if isinstance(data, dict) else None
-            
             if not imagen_base64:
                 cuerpo_crudo = data_cruda.decode("utf-8", errors="ignore").strip()
                 imagen_base64 = cuerpo_crudo.replace('{"image":"', '').replace('{"Image":"', '').replace('image=', '').rstrip('"}').strip()
-
             image_data = base64.b64decode(imagen_base64)
             ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
         except Exception:
@@ -54,27 +55,27 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
+    # 3. INYECTAR LA CADENA ÚNICA EN EL PROMPT MAESTRO
     prompt_maestro = (
-        "Actúa como un Cardiólogo Especialista Avanzado. Analiza minuciosamente esta imagen. "
+        f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
+        f"HISTORIA CLÍNICA DEL PACIENTE: {datos_paciente}. "
         "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
-        "Si NO es un ECG (ej. es una persona, un paisaje, un objeto, o está en blanco), establece 'es_ecg' en false y deja los demás campos vacíos. "
-        "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS CRÍTICAS: "
-        "1. Ignora texto escrito a mano. Analiza solo derivaciones. "
-        "2. Razona cruzando información de todas las derivaciones. "
-        "3. Si dudas por interferencia, pon 'sospecha a confirmar'. "
-        "4. Enumera diagnósticos diferenciales si corresponde. "
-        "Devuelve SOLO un JSON válido. Claves exactas: "
+        "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
+        "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
+        "1. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
+        "2. ASESINOS SILENCIOSOS: Descarta activamente la presencia de Síndrome de Wellens, Patrón de Brugada, Ondas T de De Winter, y aplica Criterios de Sgarbossa si hay Bloqueo de Rama Izquierda. "
+        "3. MEDICIONES CUANTITATIVAS: Calcula estrictamente el Intervalo QTc y el Eje Eléctrico exacto en grados, inclúyelos en 'datos_tecnicos'. "
+        "4. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
+        "Devuelve SOLO un JSON válido con estas claves exactas: "
         "'es_ecg' (boolean), "
+        "'cables_invertidos' (boolean), "
+        "'confianza_ia' (string), "
         "'datos_tecnicos' (array strings), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
         "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
-        "'manejo_sac' (string: detalla fármacos y dosis según guías SAC/SAE), "
+        "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
         "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS (EXHAUSTIVIDAD Y PRECISIÓN ESPACIAL ABSOLUTA): "
-        "1. CORRELACIÓN 1 A 1: Cada anomalía mencionada en 'lista_hallazgos' DEBE tener marcas obligatorias en el array 'marcas'. "
-        "2. REGLA DE 1 MARCA POR DERIVACIÓN: Si una alteración aparece en varias derivaciones (ej. infradesnivel en V2, V3 y V4), crea exactamente UNA marca en V2, UNA en V3 y UNA en V4. Prohibido marcar todos los latidos repetidos de una misma derivación. "
-        "3. PRECISIÓN ESPACIAL ESTRICTA (¡CRÍTICO!): NO asumas posiciones estándar (como que V1 siempre está arriba a la derecha). Debes mirar EXCLUSIVAMENTE los píxeles de ESTA imagen exacta que recibes. Calcula 'x_porcentaje' y 'y_porcentaje' (0 a 100) basándote 100% en dónde visualmente se encuentra el trazo de la anomalía. "
-        "4. 'nivel_riesgo' DEBE ser exactamente: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'."
+        "REGLAS DE MARCAS: Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. Coordenadas calculadas visualmente sobre ESTA foto. Riesgo: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -102,48 +103,103 @@ def analizar_ecg():
     try:
         escala = max(1.0, w_orig / 1200.0)
         
-        # FILTRO DE SEGURIDAD: SI NO ES UN ECG, DIBUJAMOS EL PERRITO
+        # FILTRO DE SEGURIDAD (PERRITO)
         if not analisis_hallazgos.get("es_ecg", True):
             ancho_dog = int(max(800, w_orig))
             alto_dog = int(max(600, h_orig))
             img_perro = Image.new("RGB", (ancho_dog, alto_dog), color=(255, 255, 255))
             draw_dog = ImageDraw.Draw(img_perro)
-            
             cx, cy = ancho_dog // 2, alto_dog // 2
             grosor = int(5 * escala)
             
-            # Dibujo a mano alzada procedural (Garabato)
-            draw_dog.ellipse([cx-120*escala, cy-120*escala, cx+120*escala, cy+120*escala], outline=(40,40,40), width=grosor) # Cabeza
-            draw_dog.ellipse([cx-160*escala, cy-90*escala, cx-80*escala, cy+70*escala], outline=(40,40,40), width=grosor)  # Oreja Izq
-            draw_dog.ellipse([cx+80*escala, cy-90*escala, cx+160*escala, cy+70*escala], outline=(40,40,40), width=grosor)   # Oreja Der
-            draw_dog.ellipse([cx-50*escala, cy-30*escala, cx-25*escala, cy-5*escala], fill=(40,40,40))                     # Ojo Izq
-            draw_dog.ellipse([cx+25*escala, cy-30*escala, cx+50*escala, cy-5*escala], fill=(40,40,40))                     # Ojo Der
-            draw_dog.ellipse([cx-15*escala, cy+15*escala, cx+15*escala, cy+35*escala], fill=(40,40,40))                    # Nariz
-            draw_dog.arc([cx-40*escala, cy+15*escala, cx, cy+55*escala], start=0, end=180, fill=(40,40,40), width=grosor)  # Sonrisa Izq
-            draw_dog.arc([cx, cy+15*escala, cx+40*escala, cy+55*escala], start=0, end=180, fill=(40,40,40), width=grosor)  # Sonrisa Der
+            draw_dog.ellipse([cx-120*escala, cy-120*escala, cx+120*escala, cy+120*escala], outline=(40,40,40), width=grosor) 
+            draw_dog.ellipse([cx-160*escala, cy-90*escala, cx-80*escala, cy+70*escala], outline=(40,40,40), width=grosor)  
+            draw_dog.ellipse([cx+80*escala, cy-90*escala, cx+160*escala, cy+70*escala], outline=(40,40,40), width=grosor)   
+            draw_dog.ellipse([cx-50*escala, cy-30*escala, cx-25*escala, cy-5*escala], fill=(40,40,40))                     
+            draw_dog.ellipse([cx+25*escala, cy-30*escala, cx+50*escala, cy-5*escala], fill=(40,40,40))                     
+            draw_dog.ellipse([cx-15*escala, cy+15*escala, cx+15*escala, cy+35*escala], fill=(40,40,40))                    
+            draw_dog.arc([cx-40*escala, cy+15*escala, cx, cy+55*escala], start=0, end=180, fill=(40,40,40), width=grosor)  
+            draw_dog.arc([cx, cy+15*escala, cx+40*escala, cy+55*escala], start=0, end=180, fill=(40,40,40), width=grosor)  
 
-            try:
-                f_perro = ImageFont.truetype("DejaVuSans-Bold.ttf", int(30 * escala))
-            except:
-                f_perro = ImageFont.load_default()
+            try: f_tit = ImageFont.truetype("DejaVuSans-Bold.ttf", int(30 * escala))
+            except: f_tit = ImageFont.load_default()
             
-            msj1 = "¡Guau! Esto no parece un electrocardiograma."
-            msj2 = "Por favor, selecciona una imagen con derivaciones válidas."
-            draw_dog.text((cx - (len(msj1)*8*escala), cy + 160*escala), msj1, fill=(80, 80, 80), font=f_perro)
-            draw_dog.text((cx - (len(msj2)*8*escala), cy + 200*escala), msj2, fill=(80, 80, 80), font=f_perro)
+            m1 = "¡Guau! Esto no parece un electrocardiograma."
+            m2 = "Por favor, selecciona una imagen con derivaciones."
+            draw_dog.text((cx - (len(m1)*8*escala), cy + 160*escala), m1, fill=(80, 80, 80), font=f_tit)
+            draw_dog.text((cx - (len(m2)*8*escala), cy + 200*escala), m2, fill=(80, 80, 80), font=f_tit)
 
             buf = io.BytesIO()
             img_perro.save(buf, format="PNG", compress_level=0)
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
+        # FILTRO CABLES INVERTIDOS (SILUETA)
+        if analisis_hallazgos.get("cables_invertidos", False):
+            ancho_silueta = int(max(900, w_orig))
+            alto_silueta = int(max(700, h_orig))
+            img_sil = Image.new("RGB", (ancho_silueta, alto_silueta), color=(245, 245, 245))
+            draw_sil = ImageDraw.Draw(img_sil)
+            cx, cy = ancho_silueta // 2, alto_silueta // 2
+            
+            try:
+                f_tit = ImageFont.truetype("DejaVuSans-Bold.ttf", int(24 * escala))
+                f_txt = ImageFont.truetype("DejaVuSans.ttf", int(16 * escala))
+                f_chico = ImageFont.truetype("DejaVuSans-Bold.ttf", int(12 * escala))
+            except:
+                f_tit = f_txt = f_chico = ImageFont.load_default()
 
-        # RENDERIZADO MÉDICO NORMAL SI ES UN ECG
+            draw_sil.text((cx - (250*escala), 40*escala), "ALERTA: ELECTRODOS INVERTIDOS", fill=(200, 30, 30), font=f_tit)
+            draw_sil.text((cx - (300*escala), 80*escala), "Se detectó inversión de cables (Ej. aVR positivo). Por favor, repita el ECG usando esta guía:", fill=(50, 50, 50), font=f_txt)
+
+            g = int(4 * escala)
+            color_cuerpo = (180, 180, 180)
+            draw_sil.ellipse([cx-40*escala, cy-200*escala, cx+40*escala, cy-120*escala], outline=color_cuerpo, width=g) 
+            draw_sil.line([cx, cy-120*escala, cx, cy-90*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx-140*escala, cy-90*escala, cx+140*escala, cy-90*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx-140*escala, cy-90*escala, cx-160*escala, cy+40*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx+140*escala, cy-90*escala, cx+160*escala, cy+40*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx-80*escala, cy-90*escala, cx-80*escala, cy+100*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx+80*escala, cy-90*escala, cx+80*escala, cy+100*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx-80*escala, cy+100*escala, cx+80*escala, cy+100*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx-60*escala, cy+100*escala, cx-60*escala, cy+250*escala], fill=color_cuerpo, width=g) 
+            draw_sil.line([cx+60*escala, cy+100*escala, cx+60*escala, cy+250*escala], fill=color_cuerpo, width=g) 
+
+            def poner_electrodo(x, y, nombre, color_pin):
+                r = int(10*escala)
+                draw_sil.ellipse([x-r, y-r, x+r, y+r], fill=color_pin)
+                draw_sil.text((x + 15*escala, y - 8*escala), nombre, fill=(40,40,40), font=f_chico)
+
+            poner_electrodo(cx-160*escala, cy-20*escala, "RA (Rojo/Blanco)", (200,40,40))
+            poner_electrodo(cx+160*escala, cy-20*escala, "LA (Amarillo/Negro)", (200,200,40))
+            poner_electrodo(cx-60*escala, cy+220*escala, "RL (Negro/Verde)", (40,40,40))
+            poner_electrodo(cx+60*escala, cy+220*escala, "LL (Verde/Rojo)", (40,200,40))
+
+            poner_electrodo(cx-20*escala, cy-40*escala, "V1", (200,40,40))
+            poner_electrodo(cx+20*escala, cy-40*escala, "V2", (200,200,40))
+            poner_electrodo(cx+35*escala, cy-25*escala, "V3", (40,200,40))
+            poner_electrodo(cx+50*escala, cy-10*escala, "V4", (139,69,19))
+            poner_electrodo(cx+70*escala, cy-10*escala, "V5", (40,40,40))
+            poner_electrodo(cx+90*escala, cy-10*escala, "V6", (128,0,128))
+
+            buf = io.BytesIO()
+            img_sil.save(buf, format="PNG", compress_level=0)
+            buf.seek(0)
+            return send_file(buf, mimetype="image/png")
+
+        # RENDERIZADO MÉDICO NORMAL
         ancho_panel = int(920 * escala)
         col_w = int(42)
         
         dt = analisis_hallazgos.get("datos_tecnicos", [])
         datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
+        
+        # 4. IMPRIMIR LA CADENA ÚNICA DIRECTO EN EL REPORTE FINAL
+        datos_t.insert(0, datos_paciente)
+        
+        confianza = analisis_hallazgos.get("confianza_ia", "N/A")
+        datos_t.insert(1, f"CONFIANZA DEL ANÁLISIS: {confianza}")
+
         lista_h = analisis_hallazgos.get("lista_hallazgos", [])
         if not isinstance(lista_h, list): lista_h = [str(lista_h)]
         lista_h.append(f"RIESGO QUIRÚRGICO: {analisis_hallazgos.get('riesgo_quirurgico', 'No evaluado')}")
@@ -165,15 +221,12 @@ def analizar_ecg():
             if r not in colores_riesgo: r = 'indeterminado'
             desc = str(m.get("descripcion_breve", "Alteración")).strip()
             
-            if r not in tipos_presentes:
-                tipos_presentes[r] = []
-            if desc and desc not in tipos_presentes[r]:
-                tipos_presentes[r].append(desc)
+            if r not in tipos_presentes: tipos_presentes[r] = []
+            if desc and desc not in tipos_presentes[r]: tipos_presentes[r].append(desc)
 
         def calc_y(lineas):
             h = 20 * escala
-            for item in lineas:
-                h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
+            for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
             return h + (20 * escala)
 
         h_c1 = (45*escala) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
@@ -231,7 +284,7 @@ def analizar_ecg():
                     y_c1 += int(16 * escala)
                 y_c1 += int(12 * escala)
 
-        render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE:", lista_h)
+        render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE (Busca Sgarbossa, Wellens, Brugada):", lista_h)
         y_c3 = render_txt(c3_x, int(45 * escala), "ETIOLOGÍA (Diferenciales):", [str(analisis_hallazgos.get("etiologia", "N/A"))])
         render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y FÁRMACOS (Guías SAC/SAE):", manejo)
 

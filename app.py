@@ -17,14 +17,14 @@ client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Nivel Especialista (Cadena Única)"
+    return "API de Procesamiento de ECG Activa - Nivel: Máquina de Descifrar ECG"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    # 1. ATRAPAR LA CADENA ÚNICA ENVIADA DESDE APP INVENTOR
+    # 1. RECIBE LA CADENA ÚNICA DESDE APP INVENTOR
     datos_paciente = request.args.get('datos', 'Paciente sin datos clínicos proporcionados.')
     
-    # 2. PROCESAR LA IMAGEN
+    # 2. PROCESA LA IMAGEN
     ecg_orig = None
     data_cruda = request.get_data()
     try:
@@ -55,27 +55,28 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # 3. INYECTAR LA CADENA ÚNICA EN EL PROMPT MAESTRO
+    # 3. EL CEREBRO: PROMPT MAESTRO CON RAZONAMIENTO ESTRUCTURADO Y ANTI-SESGO
     prompt_maestro = (
-        f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
-        f"HISTORIA CLÍNICA DEL PACIENTE: {datos_paciente}. "
-        "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
-        "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
-        "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
-        "1. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
-        "2. ASESINOS SILENCIOSOS: Descarta activamente la presencia de Síndrome de Wellens, Patrón de Brugada, Ondas T de De Winter, y aplica Criterios de Sgarbossa si hay Bloqueo de Rama Izquierda. "
-        "3. MEDICIONES CUANTITATIVAS: Calcula estrictamente el Intervalo QTc y el Eje Eléctrico exacto en grados, inclúyelos en 'datos_tecnicos'. "
-        "4. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
+        f"Actúa como la Máquina de Diagnóstico Cardiológico más avanzada del mundo. "
+        f"HISTORIA CLÍNICA: {datos_paciente}. "
+        "REGLA ANTI-SESGO: Analiza los píxeles de forma 100% objetiva. Usa la clínica SOLO para ponderar hallazgos reales de la imagen, no inventes patologías. "
+        "REGLA DE ORO INICIAL: Determina si la imagen contiene un ECG válido. Si no es un ECG, pon 'es_ecg' en false y deja el resto vacío. "
+        "MÉTODO DE LECTURA SISTEMÁTICA OBLIGATORIA (Chain of Thought): "
+        "En el campo 'razonamiento_interno' debes debatir paso a paso: 1. Frecuencia y Ritmo. 2. Eje Eléctrico. 3. Onda P y PR. 4. Complejo QRS (duración/morfología). 5. Segmento ST y Onda T. 6. QTc. "
+        "DIAGNÓSTICOS AVANZADOS: Busca Wellens, Brugada, De Winter y Sgarbossa (si hay BRI). "
+        "Si hay isquemia/infarto, determina la TOPOGRAFÍA (ej. Cara Anteroseptal) y predice la ARTERIA CULPABLE (ej. Descendente Anterior proximal). "
+        "ERROR DE ENFERMERÍA: Si detectas cables invertidos (ej. aVR positivo), pon 'cables_invertidos' en true y no diagnostiques más. "
+        "CÓDIGO ROJO: Si detectas una emergencia inminente de riesgo de vida (IAMCEST, arritmia letal, bloqueo AV de alto grado), establece 'alerta_roja' en true. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
-        "'es_ecg' (boolean), "
-        "'cables_invertidos' (boolean), "
-        "'confianza_ia' (string), "
-        "'datos_tecnicos' (array strings), "
+        "'es_ecg' (boolean), 'cables_invertidos' (boolean), 'alerta_roja' (boolean), "
+        "'razonamiento_interno' (string: tu análisis clínico paso a paso oculto), "
+        "'confianza_ia' (string), 'datos_tecnicos' (array strings), "
+        "'topografia_arteria' (string: ej. 'Cara Inferior - Coronaria Derecha' o 'Sin isquemia regional'), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
         "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
-        "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
+        "'manejo_sac' (string: dosis exactas SAC/SAE), "
         "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS: Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. Coordenadas calculadas visualmente sobre ESTA foto. Riesgo: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'."
+        "REGLA MARCAS: 1 marca por derivación afectada. Coordenadas reales exactas sobre la anomalía visual. Riesgo: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -103,7 +104,7 @@ def analizar_ecg():
     try:
         escala = max(1.0, w_orig / 1200.0)
         
-        # FILTRO DE SEGURIDAD (PERRITO)
+        # --- FILTRO 1: NO ES UN ECG (DIBUJA EL PERRITO) ---
         if not analisis_hallazgos.get("es_ecg", True):
             ancho_dog = int(max(800, w_orig))
             alto_dog = int(max(600, h_orig))
@@ -134,7 +135,7 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # FILTRO CABLES INVERTIDOS (SILUETA)
+        # --- FILTRO 2: CABLES INVERTIDOS (DIBUJA LA SILUETA) ---
         if analisis_hallazgos.get("cables_invertidos", False):
             ancho_silueta = int(max(900, w_orig))
             alto_silueta = int(max(700, h_orig))
@@ -187,21 +188,26 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # RENDERIZADO MÉDICO NORMAL
+        # --- RENDERIZADO MÉDICO AVANZADO ---
         ancho_panel = int(920 * escala)
         col_w = int(42)
         
         dt = analisis_hallazgos.get("datos_tecnicos", [])
         datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
         
-        # 4. IMPRIMIR LA CADENA ÚNICA DIRECTO EN EL REPORTE FINAL
+        # Inyecta los datos del paciente recibidos de App Inventor
         datos_t.insert(0, datos_paciente)
         
         confianza = analisis_hallazgos.get("confianza_ia", "N/A")
-        datos_t.insert(1, f"CONFIANZA DEL ANÁLISIS: {confianza}")
+        datos_t.insert(1, f"CONFIANZA DIAGNÓSTICA: {confianza}")
 
         lista_h = analisis_hallazgos.get("lista_hallazgos", [])
         if not isinstance(lista_h, list): lista_h = [str(lista_h)]
+        
+        topografia = analisis_hallazgos.get("topografia_arteria", "")
+        if topografia and "sin" not in topografia.lower():
+            lista_h.insert(0, f"TOPOGRAFÍA / ARTERIA: {topografia}")
+
         lista_h.append(f"RIESGO QUIRÚRGICO: {analisis_hallazgos.get('riesgo_quirurgico', 'No evaluado')}")
         manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
         
@@ -229,9 +235,12 @@ def analizar_ecg():
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
             return h + (20 * escala)
 
-        h_c1 = (45*escala) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
-        h_c2 = (45*escala) + calc_y(lista_h)
-        h_c3 = (45*escala) + calc_y([str(analisis_hallazgos.get("etiologia", ""))]) + calc_y(manejo)
+        alerta_roja = analisis_hallazgos.get("alerta_roja", False)
+        offset_alerta = (60 * escala) if alerta_roja else 0
+
+        h_c1 = (45*escala) + offset_alerta + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
+        h_c2 = (45*escala) + offset_alerta + calc_y(lista_h)
+        h_c3 = (45*escala) + offset_alerta + calc_y([str(analisis_hallazgos.get("etiologia", ""))]) + calc_y(manejo)
 
         alto_final = int(max(h_orig, h_c1, h_c2, h_c3))
         
@@ -246,16 +255,24 @@ def analizar_ecg():
             f_titulo = ImageFont.truetype("DejaVuSans-Bold.ttf", int(16 * escala))
             f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", int(12 * escala))
             f_texto = ImageFont.truetype("DejaVuSans.ttf", int(11 * escala))
+            f_alerta = ImageFont.truetype("DejaVuSans-Bold.ttf", int(18 * escala))
         except:
-            f_titulo = f_sub = f_texto = ImageFont.load_default()
+            f_titulo = f_sub = f_texto = f_alerta = ImageFont.load_default()
 
         c1_x = int(w_orig + (15 * escala))
         c2_x = int(w_orig + (315 * escala))
         c3_x = int(w_orig + (615 * escala))
         
         draw.line([(w_orig, 0), (w_orig, alto_final)], fill=(200, 200, 200), width=int(max(1, escala)))
-        draw.text((c1_x, int(15 * escala)), "RESEÑA CARDIOLÓGICA PROFUNDA Y MANEJO CLÍNICO", fill=(20, 50, 100), font=f_titulo)
-        draw.line([(c1_x, int(35 * escala)), (w_orig + ancho_panel - int(15 * escala), int(35 * escala))], fill=(220, 220, 220), width=int(max(1, escala)))
+        
+        # Banner de Código Rojo
+        if alerta_roja:
+            draw.rectangle([w_orig, 0, w_orig + ancho_panel, int(45 * escala)], fill=(220, 30, 30))
+            txt_alerta = "⚠️ CÓDIGO ROJO: ATENCIÓN CLÍNICA INMEDIATA REQUERIDA ⚠️"
+            draw.text((w_orig + int(150 * escala), int(12 * escala)), txt_alerta, fill=(255, 255, 255), font=f_alerta)
+        else:
+            draw.text((c1_x, int(15 * escala)), "RESEÑA CARDIOLÓGICA PROFUNDA Y MANEJO CLÍNICO", fill=(20, 50, 100), font=f_titulo)
+            draw.line([(c1_x, int(35 * escala)), (w_orig + ancho_panel - int(15 * escala), int(35 * escala))], fill=(220, 220, 220), width=int(max(1, escala)))
 
         def render_txt(x, y, titulo, lineas):
             draw.text((x, y), titulo, fill=(40, 80, 140), font=f_sub)
@@ -266,7 +283,9 @@ def analizar_ecg():
                     y += int(16 * escala)
             return y + int(20 * escala)
 
-        y_c1 = render_txt(c1_x, int(45 * escala), "DATOS TÉCNICOS:", datos_t)
+        y_base = int(45 * escala) + offset_alerta
+
+        y_c1 = render_txt(c1_x, y_base, "DATOS TÉCNICOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
         if tipos_presentes:
@@ -284,9 +303,9 @@ def analizar_ecg():
                     y_c1 += int(16 * escala)
                 y_c1 += int(12 * escala)
 
-        render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE (Busca Sgarbossa, Wellens, Brugada):", lista_h)
-        y_c3 = render_txt(c3_x, int(45 * escala), "ETIOLOGÍA (Diferenciales):", [str(analisis_hallazgos.get("etiologia", "N/A"))])
-        render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y FÁRMACOS (Guías SAC/SAE):", manejo)
+        render_txt(c2_x, y_base, "HALLAZGOS CLAVE:", lista_h)
+        y_c3 = render_txt(c3_x, y_base, "ETIOLOGÍA (Diferenciales):", [str(analisis_hallazgos.get("etiologia", "N/A"))])
+        render_txt(c3_x, y_c3, "MANEJO CLÍNICO (Guías SAC/SAE):", manejo)
 
         for m in marcas_ia:
             try:

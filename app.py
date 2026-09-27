@@ -55,23 +55,26 @@ def analizar_ecg():
     w_orig, h_orig = ecg_orig.size
 
     prompt_maestro = (
-        "Actúa como un Cardiólogo Especialista Avanzado. Analiza minuciosamente este ECG. "
-        "REGLAS CLÍNICAS CRÍTICAS: "
+        "Actúa como un Cardiólogo Especialista Avanzado. Analiza minuciosamente esta imagen. "
+        "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
+        "Si NO es un ECG (ej. es una persona, un paisaje, un objeto, o está en blanco), establece 'es_ecg' en false y deja los demás campos vacíos. "
+        "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS CRÍTICAS: "
         "1. Ignora texto escrito a mano. Analiza solo derivaciones. "
         "2. Razona cruzando información de todas las derivaciones. "
         "3. Si dudas por interferencia, pon 'sospecha a confirmar'. "
         "4. Enumera diagnósticos diferenciales si corresponde. "
         "Devuelve SOLO un JSON válido. Claves exactas: "
+        "'es_ecg' (boolean), "
         "'datos_tecnicos' (array strings), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
         "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
         "'manejo_sac' (string: detalla fármacos y dosis según guías SAC/SAE), "
         "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS (EXHAUSTIVIDAD OBLIGATORIA - NO OMITAS NADA): "
-        "1. CORRELACIÓN 1 A 1: Cada anomalía mencionada en 'lista_hallazgos' DEBE tener OBLIGATORIAMENTE marcas en el array 'marcas'. No seas perezoso, marca todo lo que describas. "
-        "2. REGLA DE UBICACIÓN (1 MARCA POR DERIVACIÓN): Si una alteración aparece en varias derivaciones (ej. infradesnivel en V2, V3 y V4), crea exactamente UNA marca en V2, UNA en V3 y UNA en V4. Selecciona un solo latido representativo por derivación. PROHIBIDO marcar todos los latidos de una misma derivación, márcalo solo 1 vez por derivación afectada. "
-        "3. 'nivel_riesgo' DEBE ser exactamente: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'. "
-        "4. Coordenadas (0-100) exactas sobre el trazo."
+        "REGLAS DE MARCAS (EXHAUSTIVIDAD Y PRECISIÓN ESPACIAL ABSOLUTA): "
+        "1. CORRELACIÓN 1 A 1: Cada anomalía mencionada en 'lista_hallazgos' DEBE tener marcas obligatorias en el array 'marcas'. "
+        "2. REGLA DE 1 MARCA POR DERIVACIÓN: Si una alteración aparece en varias derivaciones (ej. infradesnivel en V2, V3 y V4), crea exactamente UNA marca en V2, UNA en V3 y UNA en V4. Prohibido marcar todos los latidos repetidos de una misma derivación. "
+        "3. PRECISIÓN ESPACIAL ESTRICTA (¡CRÍTICO!): NO asumas posiciones estándar (como que V1 siempre está arriba a la derecha). Debes mirar EXCLUSIVAMENTE los píxeles de ESTA imagen exacta que recibes. Calcula 'x_porcentaje' y 'y_porcentaje' (0 a 100) basándote 100% en dónde visualmente se encuentra el trazo de la anomalía. "
+        "4. 'nivel_riesgo' DEBE ser exactamente: 'critico', 'alto', 'moderado', 'bajo', 'indeterminado'."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -98,6 +101,44 @@ def analizar_ecg():
 
     try:
         escala = max(1.0, w_orig / 1200.0)
+        
+        # FILTRO DE SEGURIDAD: SI NO ES UN ECG, DIBUJAMOS EL PERRITO
+        if not analisis_hallazgos.get("es_ecg", True):
+            ancho_dog = int(max(800, w_orig))
+            alto_dog = int(max(600, h_orig))
+            img_perro = Image.new("RGB", (ancho_dog, alto_dog), color=(255, 255, 255))
+            draw_dog = ImageDraw.Draw(img_perro)
+            
+            cx, cy = ancho_dog // 2, alto_dog // 2
+            grosor = int(5 * escala)
+            
+            # Dibujo a mano alzada procedural (Garabato)
+            draw_dog.ellipse([cx-120*escala, cy-120*escala, cx+120*escala, cy+120*escala], outline=(40,40,40), width=grosor) # Cabeza
+            draw_dog.ellipse([cx-160*escala, cy-90*escala, cx-80*escala, cy+70*escala], outline=(40,40,40), width=grosor)  # Oreja Izq
+            draw_dog.ellipse([cx+80*escala, cy-90*escala, cx+160*escala, cy+70*escala], outline=(40,40,40), width=grosor)   # Oreja Der
+            draw_dog.ellipse([cx-50*escala, cy-30*escala, cx-25*escala, cy-5*escala], fill=(40,40,40))                     # Ojo Izq
+            draw_dog.ellipse([cx+25*escala, cy-30*escala, cx+50*escala, cy-5*escala], fill=(40,40,40))                     # Ojo Der
+            draw_dog.ellipse([cx-15*escala, cy+15*escala, cx+15*escala, cy+35*escala], fill=(40,40,40))                    # Nariz
+            draw_dog.arc([cx-40*escala, cy+15*escala, cx, cy+55*escala], start=0, end=180, fill=(40,40,40), width=grosor)  # Sonrisa Izq
+            draw_dog.arc([cx, cy+15*escala, cx+40*escala, cy+55*escala], start=0, end=180, fill=(40,40,40), width=grosor)  # Sonrisa Der
+
+            try:
+                f_perro = ImageFont.truetype("DejaVuSans-Bold.ttf", int(30 * escala))
+            except:
+                f_perro = ImageFont.load_default()
+            
+            msj1 = "¡Guau! Esto no parece un electrocardiograma."
+            msj2 = "Por favor, selecciona una imagen con derivaciones válidas."
+            draw_dog.text((cx - (len(msj1)*8*escala), cy + 160*escala), msj1, fill=(80, 80, 80), font=f_perro)
+            draw_dog.text((cx - (len(msj2)*8*escala), cy + 200*escala), msj2, fill=(80, 80, 80), font=f_perro)
+
+            buf = io.BytesIO()
+            img_perro.save(buf, format="PNG", compress_level=0)
+            buf.seek(0)
+            return send_file(buf, mimetype="image/png")
+
+
+        # RENDERIZADO MÉDICO NORMAL SI ES UN ECG
         ancho_panel = int(920 * escala)
         col_w = int(42)
         
@@ -110,7 +151,6 @@ def analizar_ecg():
         
         marcas_ia = analisis_hallazgos.get("marcas", [])
         
-        # Mapeo de Colores por Severidad (Rojo, Morado, Amarillo, Verde, Azul)
         colores_riesgo = {
             'critico': ((220, 30, 30, 130), 'Riesgo Crítico'),
             'alto': ((148, 0, 211, 130), 'Riesgo Alto'),
@@ -181,7 +221,6 @@ def analizar_ecg():
             y_c1 += int(20 * escala)
             for r, desc_list in tipos_presentes.items():
                 rgba, desc_base = colores_riesgo[r]
-                # Ahora mostramos TODAS las descripciones asociadas a este nivel de riesgo, sin cortar.
                 txt_leyenda = f"{desc_base}: {', '.join(desc_list)}" if desc_list else desc_base
                 
                 r_size = int(10 * escala)
@@ -190,7 +229,7 @@ def analizar_ecg():
                 for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
                     draw.text((c1_x + int(22 * escala), y_c1), p, fill=(50, 50, 50), font=f_texto)
                     y_c1 += int(16 * escala)
-                y_c1 += int(12 * escala) # Espacio extra entre diferentes niveles de riesgo
+                y_c1 += int(12 * escala)
 
         render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE:", lista_h)
         y_c3 = render_txt(c3_x, int(45 * escala), "ETIOLOGÍA (Diferenciales):", [str(analisis_hallazgos.get("etiologia", "N/A"))])
@@ -203,7 +242,6 @@ def analizar_ecg():
                 px = int(w_orig * (min(max(float(m.get("x_porcentaje", 50)), 0), 100) / 100.0))
                 py = int(h_orig * (min(max(float(m.get("y_porcentaje", 50)), 0), 100) / 100.0))
                 
-                # Tamaño de la marca reducido y transparente como lo pediste
                 rad = int(12 * escala)
                 draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], fill=colores_riesgo[r][0])
             except: continue

@@ -17,7 +17,7 @@ client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Análisis Detallado de Ondas y Segmentos"
+    return "API de Procesamiento de ECG Activa - Análisis Inteligente de Parámetros Normales/Alterados"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -55,24 +55,24 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # 3. PROMPT MAESTRO CON ANÁLISIS DETALLADO DE ONDAS, SEGMENTOS E INTERVALOS
+    # 3. PROMPT MAESTRO CON REGLA INTELIGENTE PARA PARÁMETROS NORMALES VS ALTERADOS
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
         f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
         "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
         "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
-        "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
+        "Si ES un ECG, establece 'es_ecg' in true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
         "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal en 'anamnesis_redactada'. "
-        "2. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
-        "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula estrictamente la Frecuencia Cardíaca real por intervalos R-R, Ritmo, Eje Eléctrico e Intervalo QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
-        "4. ANÁLISIS DE ONDAS Y SEGMENTOS: Devuelve un array en 'datos_tecnicos' con el formato exacto 'Medida: Valor (Normal: Rango) - Posible Causa: ...' (ej: 'Onda P: 110 ms (Normal: 120-200 ms) - Posible Causa: Crecimiento auricular'). "
+        "2. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' in true, y NO diagnostiques nada más. "
+        "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula Frecuencia Cardíaca, Ritmo, Eje Eléctrico y QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
+        "4. ANÁLISIS CONDICIONAL DE ONDAS Y SEGMENTOS: Devuelve un array en 'datos_tecnicos'. REGLA ESTRICTA: Si el parámetro (onda, segmento, intervalo, eje o frecuencia) ES NORMAL, escribe únicamente el valor y su rango normal (ej: 'Intervalo PR: 160 ms (Normal: 120-200 ms) - Sin alteraciones'). SOLO si el parámetro ESTÁ ALTERADO, agrega la posible causa clínica (ej: 'Intervalo QTc: 470 ms (Normal: 350-450 ms) - Posible Causa: Repolarización prolongada'). PROHIBIDO poner causas a lo que está normal. "
         "5. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
         "'es_ecg' (boolean), "
         "'cables_invertidos' (boolean), "
         "'anamnesis_redactada' (string), "
         "'confianza_ia' (string), "
-        "'datos_tecnicos' (array strings con el desglose detallado de onda/segmento/intervalo), "
+        "'datos_tecnicos' (array strings con la regla condicional normal vs alterado), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
         "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
         "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
@@ -270,7 +270,7 @@ def analizar_ecg():
                     y += int(16 * escala)
             return y + int(20 * escala)
 
-        # RENDER COLUMNA 1 (Anamnesis + Análisis de Ondas y Segmentos + Ionograma + Leyenda)
+        # RENDER COLUMNA 1 (Anamnesis + Análisis Condicional de Ondas y Segmentos + Ionograma + Leyenda)
         y_c1 = render_txt(c1_x, int(45 * escala), "ANAMNESIS DEL PACIENTE:", anamnesis_lines)
         y_c1 = render_txt(c1_x, y_c1, "ANÁLISIS DE ONDAS Y SEGMENTOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])

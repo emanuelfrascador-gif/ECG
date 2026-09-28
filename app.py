@@ -17,12 +17,12 @@ client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Nivel Especialista (Cadena Única + Precisión Milimétrica)"
+    return "API de Procesamiento de ECG Activa - Versión Definitiva con Anamnesis IA"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    # 1. ATRAPAR LA CADENA ÚNICA ENVIADA DESDE APP INVENTOR
-    datos_paciente = request.args.get('datos', 'Paciente sin datos clínicos proporcionados.')
+    # 1. ATRAPAR LA CADENA CRUDA ENVIADA DESDE APP INVENTOR
+    datos_crudos = request.args.get('datos', 'Paciente sin datos clínicos proporcionados.')
     
     # 2. PROCESAR LA IMAGEN
     ecg_orig = None
@@ -55,29 +55,32 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # 3. INYECTAR LA CADENA ÚNICA Y EL ANCLAJE A LA TINTA EN EL PROMPT MAESTRO
+    # 3. PROMPT MAESTRO CON REDACCIÓN MÉDICA Y ANÁLISIS MILIMÉTRICO
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
-        f"HISTORIA CLÍNICA DEL PACIENTE: {datos_paciente}. "
+        f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
         "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
         "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
         "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
-        "1. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
-        "2. ASESINOS SILENCIOSOS: Descarta activamente la presencia de Síndrome de Wellens, Patrón de Brugada, Ondas T de De Winter, y aplica Criterios de Sgarbossa si hay Bloqueo de Rama Izquierda. "
-        "3. MEDICIONES CUANTITATIVAS: Calcula estrictamente el Intervalo QTc y el Eje Eléctrico exacto en grados, inclúyelos en 'datos_tecnicos'. "
-        "4. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
+        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal y elegante en formato de historia clínica médica (ej: 'Paciente de X años, sexo..., que consulta por... con antecedente de...'). Devuélvelo en la clave 'anamnesis_redactada'. "
+        "2. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
+        "3. ASESINOS SILENCIOSOS: Evalúa activamente Síndrome de Wellens, Patrón de Brugada, Ondas T de De Winter, y Criterios de Sgarbossa. "
+        "4. MEDICIONES CUANTITATIVAS: Calcula estrictamente el Intervalo QTc y el Eje Eléctrico exacto en grados, inclúyelos en 'datos_tecnicos'. "
+        "5. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
         "'es_ecg' (boolean), "
         "'cables_invertidos' (boolean), "
+        "'anamnesis_redactada' (string), "
         "'confianza_ia' (string), "
         "'datos_tecnicos' (array strings), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
         "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
         "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
+        "'tecnicas_utilizadas' (array strings: Enumera criterios específicos buscados, ej: 'Criterios de Sgarbossa', 'Descarte patrón Brugada', etc.), "
         "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
         "REGLAS DE MARCAS (PRECISIÓN MILIMÉTRICA ESTRICTA): "
-        "1. Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca representativa por derivación. "
-        "2. ANCLAJE A LA TINTA: PROHIBIDO poner marcas flotando en espacios en blanco o en el medio del papel cuadriculado. Las coordenadas (x_porcentaje, y_porcentaje) DEBEN caer EXACTAMENTE SOBRE LOS PÍXELES DE TINTA NEGRA del trazo de la derivación alterada. Si la onda T de V2 está en Y=75%, debes poner 75, no 50. Apunta directamente al centro visual del pico, valle o segmento alterado."
+        "1. Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. "
+        "2. ANCLAJE A LA TINTA: PROHIBIDO poner marcas flotando en espacios en blanco o en el medio del papel cuadriculado. Las coordenadas (x_porcentaje, y_porcentaje) DEBEN caer EXACTAMENTE SOBRE LOS PÍXELES DE TINTA NEGRA del trazo de la derivación alterada."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -172,49 +175,51 @@ def analizar_ecg():
                 draw_sil.ellipse([x-r, y-r, x+r, y+r], fill=color_pin)
                 draw_sil.text((x + 15*escala, y - 8*escala), nombre, fill=(40,40,40), font=f_chico)
 
-            poner_electrodo(cx-160*escala, cy-20*escala, "RA (Rojo/Blanco)", (200,40,40))
-            poner_electrodo(cx+160*escala, cy-20*escala, "LA (Amarillo/Negro)", (200,200,40))
-            poner_electrodo(cx-60*escala, cy+220*escala, "RL (Negro/Verde)", (40,40,40))
-            poner_electrodo(cx+60*escala, cy+220*escala, "LL (Verde/Rojo)", (40,200,40))
-
-            poner_electrodo(cx-20*escala, cy-40*escala, "V1", (200,40,40))
-            poner_electrodo(cx+20*escala, cy-40*escala, "V2", (200,200,40))
-            poner_electrodo(cx+35*escala, cy-25*escala, "V3", (40,200,40))
-            poner_electrodo(cx+50*escala, cy-10*escala, "V4", (139,69,19))
-            poner_electrodo(cx+70*escala, cy-10*escala, "V5", (40,40,40))
-            poner_electrodo(cx+90*escala, cy-10*escala, "V6", (128,0,128))
+            poner_electrodo(cx-160*escala, cy-20*escala, "RA (Rojo)", (200,40,40))
+            poner_electrodo(cx+160*escala, cy-20*escala, "LA (Amarillo)", (200,200,40))
+            poner_electrodo(cx-60*escala, cy+220*escala, "RL (Negro)", (40,40,40))
+            poner_electrodo(cx+60*escala, cy+220*escala, "LL (Verde)", (40,200,40))
 
             buf = io.BytesIO()
             img_sil.save(buf, format="PNG", compress_level=0)
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # RENDERIZADO MÉDICO NORMAL
+        # RENDERIZADO MÉDICO NORMAL (JERÁRQUICO Y LIMPIO)
         ancho_panel = int(920 * escala)
         col_w = int(42)
         
+        # 1. ANAMNESIS REDACTADA POR LA IA
+        anamnesis_texto = str(analisis_hallazgos.get("anamnesis_redactada", datos_crudos))
+        anamnesis_lines = [anamnesis_texto]
+
+        # 2. DATOS TÉCNICOS
         dt = analisis_hallazgos.get("datos_tecnicos", [])
         datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
         
-        # 4. IMPRIMIR LA CADENA ÚNICA DIRECTO EN EL REPORTE FINAL
-        datos_t.insert(0, datos_paciente)
-        
-        confianza = analisis_hallazgos.get("confianza_ia", "N/A")
-        datos_t.insert(1, f"CONFIANZA DEL ANÁLISIS: {confianza}")
-
+        # 3. HALLAZGOS Y ETIOLOGÍA
         lista_h = analisis_hallazgos.get("lista_hallazgos", [])
         if not isinstance(lista_h, list): lista_h = [str(lista_h)]
         lista_h.append(f"RIESGO QUIRÚRGICO: {analisis_hallazgos.get('riesgo_quirurgico', 'No evaluado')}")
+        etiologia = [str(analisis_hallazgos.get("etiologia", "N/A"))]
+        
+        # 4. MANEJO CLÍNICO
         manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
         
+        # 5. TÉCNICAS DE ANÁLISIS IA
+        tecnicas = analisis_hallazgos.get("tecnicas_utilizadas", [])
+        if not isinstance(tecnicas, list): tecnicas = [str(tecnicas)]
+        confianza = analisis_hallazgos.get("confianza_ia", "N/A")
+        tecnicas.insert(0, f"CONFIANZA DEL ANÁLISIS VISUAL: {confianza}")
+
+        # LEYENDA Y MARCAS
         marcas_ia = analisis_hallazgos.get("marcas", [])
-        
         colores_riesgo = {
             'critico': ((220, 30, 30, 130), 'Riesgo Crítico'),
             'alto': ((148, 0, 211, 130), 'Riesgo Alto'),
             'moderado': ((220, 200, 30, 130), 'Riesgo Moderado'),
             'bajo': ((30, 200, 30, 130), 'Riesgo Bajo'),
-            'indeterminado': ((30, 100, 220, 130), 'A Confirmar / Artefacto')
+            'indeterminado': ((30, 100, 220, 130), 'A Confirmar')
         }
 
         tipos_presentes = {}
@@ -222,7 +227,6 @@ def analizar_ecg():
             r = str(m.get("nivel_riesgo", "indeterminado")).lower()
             if r not in colores_riesgo: r = 'indeterminado'
             desc = str(m.get("descripcion_breve", "Alteración")).strip()
-            
             if r not in tipos_presentes: tipos_presentes[r] = []
             if desc and desc not in tipos_presentes[r]: tipos_presentes[r].append(desc)
 
@@ -231,15 +235,15 @@ def analizar_ecg():
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
             return h + (20 * escala)
 
-        h_c1 = (45*escala) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
-        h_c2 = (45*escala) + calc_y(lista_h)
-        h_c3 = (45*escala) + calc_y([str(analisis_hallazgos.get("etiologia", ""))]) + calc_y(manejo)
+        # Alturas de Columnas
+        h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
+        h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
+        h_c3 = (45*escala) + calc_y(manejo) + calc_y(tecnicas)
 
         alto_final = int(max(h_orig, h_c1, h_c2, h_c3))
         
         img_final = Image.new("RGB", (w_orig + ancho_panel, alto_final), color=(248, 248, 250))
         img_final.paste(ecg_orig, (0, 0))
-        
         c_overlay = Image.new("RGBA", img_final.size, (255, 255, 255, 0))
         draw_ov = ImageDraw.Draw(c_overlay)
         draw = ImageDraw.Draw(img_final)
@@ -268,7 +272,9 @@ def analizar_ecg():
                     y += int(16 * escala)
             return y + int(20 * escala)
 
-        y_c1 = render_txt(c1_x, int(45 * escala), "DATOS TÉCNICOS:", datos_t)
+        # RENDER COLUMNA 1 (Anamnesis redactada + Técnicos + Leyenda)
+        y_c1 = render_txt(c1_x, int(45 * escala), "ANAMNESIS DEL PACIENTE:", anamnesis_lines)
+        y_c1 = render_txt(c1_x, y_c1, "DATOS TÉCNICOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
         if tipos_presentes:
@@ -286,10 +292,15 @@ def analizar_ecg():
                     y_c1 += int(16 * escala)
                 y_c1 += int(12 * escala)
 
-        render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE (Busca Sgarbossa, Wellens, Brugada):", lista_h)
-        y_c3 = render_txt(c3_x, int(45 * escala), "ETIOLOGÍA (Diferenciales):", [str(analisis_hallazgos.get("etiologia", "N/A"))])
-        render_txt(c3_x, y_c3, "MANEJO CLÍNICO Y FÁRMACOS (Guías SAC/SAE):", manejo)
+        # RENDER COLUMNA 2 (Hallazgos y Etiología)
+        y_c2 = render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE:", lista_h)
+        y_c2 = render_txt(c2_x, y_c2, "ETIOLOGÍA (Diferenciales):", etiologia)
 
+        # RENDER COLUMNA 3 (Manejo SAC y Técnicas IA)
+        y_c3 = render_txt(c3_x, int(45 * escala), "MANEJO CLÍNICO (SAC/SAE):", manejo)
+        y_c3 = render_txt(c3_x, y_c3, "TÉCNICAS DE ANÁLISIS IA:", tecnicas)
+
+        # RENDER DE MARCAS
         for m in marcas_ia:
             try:
                 r = str(m.get("nivel_riesgo", "indeterminado")).lower()

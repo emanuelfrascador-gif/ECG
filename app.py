@@ -17,7 +17,7 @@ client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Definitiva con Anamnesis IA"
+    return "API de Procesamiento de ECG Activa - Análisis Detallado de Ondas y Segmentos"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -55,32 +55,30 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # 3. PROMPT MAESTRO CON REDACCIÓN MÉDICA Y ANÁLISIS MILIMÉTRICO
+    # 3. PROMPT MAESTRO CON ANÁLISIS DETALLADO DE ONDAS, SEGMENTOS E INTERVALOS
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
         f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
         "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
         "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
         "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
-        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal y elegante en formato de historia clínica médica (ej: 'Paciente de X años, sexo..., que consulta por... con antecedente de...'). Devuélvelo en la clave 'anamnesis_redactada'. "
+        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal en 'anamnesis_redactada'. "
         "2. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
-        "3. ASESINOS SILENCIOSOS: Evalúa activamente Síndrome de Wellens, Patrón de Brugada, Ondas T de De Winter, y Criterios de Sgarbossa. "
-        "4. MEDICIONES CUANTITATIVAS: Calcula estrictamente el Intervalo QTc y el Eje Eléctrico exacto en grados, inclúyelos en 'datos_tecnicos'. "
+        "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula estrictamente la Frecuencia Cardíaca real por intervalos R-R, Ritmo, Eje Eléctrico e Intervalo QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
+        "4. ANÁLISIS DE ONDAS Y SEGMENTOS: Devuelve un array en 'datos_tecnicos' con el formato exacto 'Medida: Valor (Normal: Rango) - Posible Causa: ...' (ej: 'Onda P: 110 ms (Normal: 120-200 ms) - Posible Causa: Crecimiento auricular'). "
         "5. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
         "'es_ecg' (boolean), "
         "'cables_invertidos' (boolean), "
         "'anamnesis_redactada' (string), "
         "'confianza_ia' (string), "
-        "'datos_tecnicos' (array strings), "
+        "'datos_tecnicos' (array strings con el desglose detallado de onda/segmento/intervalo), "
         "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
         "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
         "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
         "'tecnicas_utilizadas' (array strings: Enumera criterios específicos buscados, ej: 'Criterios de Sgarbossa', 'Descarte patrón Brugada', etc.), "
         "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS (PRECISIÓN MILIMÉTRICA ESTRICTA): "
-        "1. Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. "
-        "2. ANCLAJE A LA TINTA: PROHIBIDO poner marcas flotando en espacios en blanco o en el medio del papel cuadriculado. Las coordenadas (x_porcentaje, y_porcentaje) DEBEN caer EXACTAMENTE SOBRE LOS PÍXELES DE TINTA NEGRA del trazo de la derivación alterada."
+        "REGLAS DE MARCAS (PRECISIÓN MILIMÉTRICA ESTRICTA): Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. Anclaje exacto sobre los píxeles de tinta negra del trazo."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -193,7 +191,7 @@ def analizar_ecg():
         anamnesis_texto = str(analisis_hallazgos.get("anamnesis_redactada", datos_crudos))
         anamnesis_lines = [anamnesis_texto]
 
-        # 2. DATOS TÉCNICOS
+        # 2. ANÁLISIS DETALLADO DE ONDAS Y SEGMENTOS
         dt = analisis_hallazgos.get("datos_tecnicos", [])
         datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
         
@@ -272,9 +270,9 @@ def analizar_ecg():
                     y += int(16 * escala)
             return y + int(20 * escala)
 
-        # RENDER COLUMNA 1 (Anamnesis redactada + Técnicos + Leyenda)
+        # RENDER COLUMNA 1 (Anamnesis + Análisis de Ondas y Segmentos + Ionograma + Leyenda)
         y_c1 = render_txt(c1_x, int(45 * escala), "ANAMNESIS DEL PACIENTE:", anamnesis_lines)
-        y_c1 = render_txt(c1_x, y_c1, "DATOS TÉCNICOS:", datos_t)
+        y_c1 = render_txt(c1_x, y_c1, "ANÁLISIS DE ONDAS Y SEGMENTOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
         if tipos_presentes:

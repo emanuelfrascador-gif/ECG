@@ -25,7 +25,7 @@ def obtener_riesgo_real(texto_riesgo):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - ST Recíproco, Marcas Múltiples y Leyenda Ordenada"
+    return "API de Procesamiento de ECG Activa - Anclaje Visual Dinámico Libre"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -61,26 +61,23 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
+    # PROMPT MAESTRO CON ANCLAJE VISUAL DINÁMICO (PUNTERO LÁSER)
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
         f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
         "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
         "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
         "Si ES un ECG, establece 'es_ecg' in true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
-        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos en 'anamnesis_redactada'. "
-        "2. ANÁLISIS DE ISQUEMIA Y ST (CAMBIOS RECÍPROCOS): Al evaluar el segmento ST, estás OBLIGADO a buscar imágenes en espejo (cambios recíprocos) en derivaciones opuestas. Analiza todas las derivaciones en conjunto para confirmar lesión subepicárdica o isquemia. Documenta esto explícitamente. "
-        "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula Frecuencia Cardíaca, Ritmo, Eje Eléctrico y QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
-        "4. ANÁLISIS CONDICIONAL: En 'datos_tecnicos', si el parámetro ES NORMAL, escribe únicamente el valor y su rango normal. SOLO si ESTÁ ALTERADO, agrega la posible causa clínica. "
+        "1. ANAMNESIS PROFESIONAL: Reescribe los datos en 'anamnesis_redactada'. "
+        "2. ANÁLISIS DE ISQUEMIA Y ST (CAMBIOS RECÍPROCOS): Busca siempre imágenes en espejo en derivaciones opuestas. "
+        "3. MÉTRICAS: Calcula Frecuencia, Ritmo, Eje, QTc. "
+        "4. ANÁLISIS CONDICIONAL: En 'datos_tecnicos', si es NORMAL solo valor y rango. Si es ALTERADO, agrega posible causa. "
         "5. CONFIANZA: Asigna un porcentaje en 'confianza_ia'. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
-        "'es_ecg' (boolean), 'cables_invertidos' (boolean), 'anamnesis_redactada' (string), 'confianza_ia' (string), "
-        "'datos_tecnicos' (array strings), 'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
-        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), 'manejo_sac' (string), "
-        "'tecnicas_utilizadas' (array strings), "
-        "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
+        "'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'. "
         "REGLAS ESTRICTAS DE MARCAS Y COORDENADAS (CRÍTICO): "
-        "A) EXHAUSTIVIDAD MULTICOLOR: Genera MÚLTIPLES marcas. Debes crear un objeto en el array por CADA derivación alterada. Asigna 'critico' (Rojo) a supradesniveles ST/infartos, 'alto' (Violeta) a infradesniveles ST/isquemia grave/arritmias, 'moderado' (Amarillo) a bloqueos/hipertrofias, y 'bajo' (Verde) a hallazgos leves. "
-        "B) UBICACIÓN EXACTA: 'x_porcentaje' es el eje horizontal (0=izquierda absoluta, 100=derecha absoluta). 'y_porcentaje' es el eje vertical (0=arriba, 100=abajo). Apunta al latido más representativo de cada derivación afectada, cayendo EXACTAMENTE sobre la tinta negra de la anomalía."
+        "A) EXHAUSTIVIDAD MULTICOLOR: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde). Crea una marca separada por CADA derivación alterada. "
+        "B) ANCLAJE VISUAL DINÁMICO (POINTING): ¡Olvida las grillas fijas! Los formatos de foto varían enormemente. Escanea visualmente esta imagen exacta, encuentra la etiqueta de texto de la derivación alterada (ej. 'V2'), mira el latido anormal debajo de ella, y calcula X e Y (0 al 100) para apuntar como un puntero láser EXACTAMENTE SOBRE LOS PÍXELES DE TINTA NEGRA de la alteración (ej. el pico del ST o la T invertida). PROHIBIDO marcar los márgenes de la foto o espacios en blanco."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -214,7 +211,6 @@ def analizar_ecg():
             'indeterminado': ((30, 100, 220, 200), 'A Confirmar / Artefacto')
         }
 
-        # Jerarquía estricta para ordenar la leyenda de colores
         orden_jerarquia = ['critico', 'alto', 'moderado', 'bajo', 'indeterminado']
         tipos_presentes_crudos = {}
         
@@ -270,7 +266,6 @@ def analizar_ecg():
         y_c1 = render_txt(c1_x, y_c1, "ANÁLISIS DE ONDAS Y SEGMENTOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
-        # Renderizado de leyenda con orden jerárquico forzado
         if tipos_presentes_crudos:
             draw.text((c1_x, y_c1), "LEYENDA DE COLORES (Por Riesgo):", fill=(40, 80, 140), font=f_sub)
             y_c1 += int(20 * escala)

@@ -7,6 +7,7 @@ import textwrap
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
@@ -16,87 +17,91 @@ client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Sistema Ultra Estable"
+    return "API de Procesamiento de ECG Activa - Versión Estable Original"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
+    datos_crudos = request.args.get('datos', 'Paciente sin datos clínicos proporcionados.')
+    
+    ecg_orig = None
+    data_cruda = request.get_data()
     try:
-        datos_crudos = request.args.get('datos', 'Paciente sin datos clínicos proporcionados.')
-        
-        ecg_orig = None
-        data_cruda = request.get_data()
+        if data_cruda:
+            ecg_orig = Image.open(io.BytesIO(data_cruda)).convert("RGB")
+    except Exception:
+        pass
+
+    if not ecg_orig:
         try:
-            if data_cruda:
-                ecg_orig = Image.open(io.BytesIO(data_cruda)).convert("RGB")
+            data = request.get_json(silent=True, force=True)
+            imagen_base64 = data.get("image") or data.get("Image") if isinstance(data, dict) else None
+            if not imagen_base64:
+                cuerpo_crudo = data_cruda.decode("utf-8", errors="ignore").strip()
+                imagen_base64 = cuerpo_crudo.replace('{"image":"', '').replace('{"Image":"', '').replace('image=', '').rstrip('"}').strip()
+            image_data = base64.b64decode(imagen_base64)
+            ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
         except Exception:
-            pass
-
-        if not ecg_orig:
             try:
-                data = request.get_json(silent=True, force=True)
-                imagen_base64 = data.get("image") or data.get("Image") if isinstance(data, dict) else None
-                if not imagen_base64:
-                    cuerpo_crudo = data_cruda.decode("utf-8", errors="ignore").strip()
-                    imagen_base64 = cuerpo_crudo.replace('{"image":"', '').replace('{"Image":"', '').replace('image=', '').rstrip('"}').strip()
-                image_data = base64.b64decode(imagen_base64)
-                ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
-            except Exception:
-                try:
-                    if b"," in data_cruda:
-                        image_data = data_cruda.split(b",", 1)[1]
-                        ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
-                except Exception as e:
-                    return {"error": f"Error procesando imagen: {str(e)}"}, 400
+                if b"," in data_cruda:
+                    image_data = data_cruda.split(b",", 1)[1]
+                    ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
+            except Exception as e:
+                return {"error": f"Error al procesar imagen: {str(e)}"}, 400
 
-        if not ecg_orig:
-            return {"error": "No se recibió ninguna imagen válida."}, 400
+    if not ecg_orig:
+        return {"error": "No se recibió ninguna imagen válida."}, 400
 
-        w_orig, h_orig = ecg_orig.size
+    w_orig, h_orig = ecg_orig.size
 
-        prompt_maestro = (
-            f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
-            f"DATOS CLÍNICOS BRUTOS: {datos_crudos}. "
-            "REGLA DE ORO: Determina si la imagen contiene AL MENOS una línea de derivación de un ECG. "
-            "Si NO es un ECG, establece 'es_ecg' en false y deja lo demás vacío. "
-            "Si ES un ECG, establece 'es_ecg' en true y sigue estas reglas: "
-            "1. ANAMNESIS: Redacta un párrafo clínico formal en 'anamnesis_redactada'. "
-            "2. CABLES: Si detectas inversión de electrodos (aVR positivo), pon 'cables_invertidos' en true. "
-            "3. MÉTRICAS Y ASESINOS: Calcula FC, Ritmo, Eje, QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
-            "4. DATOS TÉCNICOS (Ondas/Segmentos): Array de strings con formato 'Parámetro: Valor (Normal: Rango) - Causa' SOLO si está alterado. Si es normal, pon 'Parámetro: Valor (Normal: Rango) - Sin alteraciones'. "
-            "Devuelve tu respuesta ÚNICAMENTE en formato JSON plano envuelto entre etiquetas ```json y ```. "
-            "Usa estas claves exactas: "
-            "'es_ecg' (boolean), 'cables_invertidos' (boolean), 'anamnesis_redactada' (string), 'confianza_ia' (string), "
-            "'datos_tecnicos' (array strings), 'lista_hallazgos' (array strings), 'riesgo_quirurgico' (string), "
-            "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), 'manejo_sac' (string), "
-            "'tecnicas_utilizadas' (array strings), "
-            "'marcas' (array de objetos con: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo ('critico','alto','moderado','bajo','indeterminado')). "
-            "Las marcas deben ser 1 por derivación afectada, exactamente sobre los píxeles de tinta negra."
-        )
+    # PROMPT MAESTRO ORIGINAL + REGLA CONDICIONAL DE ONDAS/SEGMENTOS
+    prompt_maestro = (
+        f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
+        f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
+        "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
+        "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
+        "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
+        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal en 'anamnesis_redactada'. "
+        "2. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
+        "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula Frecuencia Cardíaca, Ritmo, Eje Eléctrico y QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
+        "4. ANÁLISIS CONDICIONAL DE ONDAS Y SEGMENTOS: Devuelve un array en 'datos_tecnicos'. REGLA ESTRICTA: Si el parámetro (onda, segmento, intervalo, eje o frecuencia) ES NORMAL, escribe únicamente el valor y su rango normal (ej: 'Intervalo PR: 160 ms (Normal: 120-200 ms) - Sin alteraciones'). SOLO si el parámetro ESTÁ ALTERADO, agrega la posible causa clínica (ej: 'Intervalo QTc: 470 ms (Normal: 350-450 ms) - Posible Causa: Repolarización prolongada'). PROHIBIDO poner causas a lo que está normal. "
+        "5. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
+        "Devuelve SOLO un JSON válido con estas claves exactas: "
+        "'es_ecg' (boolean), "
+        "'cables_invertidos' (boolean), "
+        "'anamnesis_redactada' (string), "
+        "'confianza_ia' (string), "
+        "'datos_tecnicos' (array strings), "
+        "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
+        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
+        "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
+        "'tecnicas_utilizadas' (array strings), "
+        "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
+        "REGLAS DE MARCAS (PRECISIÓN MILIMÉTRICA ESTRICTA): Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. Anclaje exacto sobre los píxeles de tinta negra del trazo."
+    )
 
-        analisis_hallazgos = None
-        errores_log = []
-        
-        for modelo_nombre in ['gemini-2.0-flash', 'gemini-1.5-flash']:
-            try:
-                response = client.models.generate_content(
-                    model=modelo_nombre,
-                    contents=[ecg_orig, prompt_maestro]
-                )
-                raw_text = response.text.strip()
-                if "```json" in raw_text:
-                    raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in raw_text:
-                    raw_text = raw_text.split("```")[1].split("```")[0].strip()
-                
-                analisis_hallazgos = json.loads(raw_text)
-                if analisis_hallazgos:
-                    break
-            except Exception as err:
-                errores_log.append(f"{modelo_nombre}: {str(err)}")
+    modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
+    try:
+        mods = [m.name.replace('models/', '') for m in client.models.list() if 'flash' in m.name.lower()]
+        if mods: modelos_autorizados = mods
+    except: pass
 
-        if not analisis_hallazgos:
-            return {"error": f"Falla total en modelos IA. Detalles: {' | '.join(errores_log)}"}, 500
+    analisis_hallazgos = None
+    for modelo in modelos_autorizados:
+        try:
+            response = client.models.generate_content(
+                model=modelo,
+                contents=[ecg_orig, prompt_maestro],
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1)
+            )
+            analisis_hallazgos = json.loads(response.text.replace("```json", "").replace("```", "").strip())
+            break
+        except Exception:
+            time.sleep(1)
 
+    if not analisis_hallazgos:
+        return {"error": "IA falló en todos los modelos."}, 500
+
+    try:
         escala = max(1.0, w_orig / 1200.0)
         
         # FILTRO DE SEGURIDAD (PERRITO)
@@ -176,6 +181,7 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
+        # RENDERIZADO MÉDICO NORMAL
         ancho_panel = int(920 * escala)
         col_w = int(42)
         
@@ -298,7 +304,7 @@ def analizar_ecg():
         return send_file(buf, mimetype="image/png")
 
     except Exception as e:
-        return {"error_critico_python": str(e)}, 500
+        return {"error": f"Error render: {str(e)}"}, 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

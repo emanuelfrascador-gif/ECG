@@ -15,9 +15,17 @@ app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
+def obtener_riesgo_real(texto_riesgo):
+    v = str(texto_riesgo).lower()
+    if 'cr' in v: return 'critico'
+    if 'alt' in v: return 'alto'
+    if 'mod' in v: return 'moderado'
+    if 'baj' in v: return 'bajo'
+    return 'indeterminado'
+
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Estable Original"
+    return "API de Procesamiento de ECG Activa - Anclaje a la Tinta Forzado"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -42,8 +50,8 @@ def analizar_ecg():
             ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
         except Exception:
             try:
-                if b"," in data_cruda:
-                    image_data = data_cruda.split(b",", 1)[1]
+                if b"," in image_data:
+                    image_data = image_data.split(b",", 1)[1]
                     ecg_orig = Image.open(io.BytesIO(image_data)).convert("RGB")
             except Exception as e:
                 return {"error": f"Error al procesar imagen: {str(e)}"}, 400
@@ -53,30 +61,28 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO ORIGINAL + REGLA CONDICIONAL DE ONDAS/SEGMENTOS
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
         f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
         "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
         "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
-        "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
+        "Si ES un ECG, establece 'es_ecg' in true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
         "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal en 'anamnesis_redactada'. "
-        "2. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' en true, y NO diagnostiques nada más. "
+        "2. ERROR DE ENFERMERÍA: Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' in true, y NO diagnostiques nada más. "
         "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula Frecuencia Cardíaca, Ritmo, Eje Eléctrico y QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
-        "4. ANÁLISIS CONDICIONAL DE ONDAS Y SEGMENTOS: Devuelve un array en 'datos_tecnicos'. REGLA ESTRICTA: Si el parámetro (onda, segmento, intervalo, eje o frecuencia) ES NORMAL, escribe únicamente el valor y su rango normal (ej: 'Intervalo PR: 160 ms (Normal: 120-200 ms) - Sin alteraciones'). SOLO si el parámetro ESTÁ ALTERADO, agrega la posible causa clínica (ej: 'Intervalo QTc: 470 ms (Normal: 350-450 ms) - Posible Causa: Repolarización prolongada'). PROHIBIDO poner causas a lo que está normal. "
-        "5. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
+        "4. ANÁLISIS CONDICIONAL: Devuelve un array en 'datos_tecnicos'. Si el parámetro ES NORMAL, escribe únicamente el valor y su rango normal. SOLO si ESTÁ ALTERADO, agrega la posible causa clínica. "
+        "5. CONFIANZA: Asigna un porcentaje en 'confianza_ia'. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
-        "'es_ecg' (boolean), "
-        "'cables_invertidos' (boolean), "
-        "'anamnesis_redactada' (string), "
-        "'confianza_ia' (string), "
-        "'datos_tecnicos' (array strings), "
-        "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
-        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
-        "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
+        "'es_ecg' (boolean), 'cables_invertidos' (boolean), 'anamnesis_redactada' (string), 'confianza_ia' (string), "
+        "'datos_tecnicos' (array strings), 'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
+        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), 'manejo_sac' (string), "
         "'tecnicas_utilizadas' (array strings), "
         "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS (PRECISIÓN MILIMÉTRICA ESTRICTA): Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. Anclaje exacto sobre los píxeles de tinta negra del trazo."
+        "REGLAS ESTRICTAS DE MARCAS Y COORDENADAS (CRÍTICO): "
+        "A) 'x_porcentaje' y 'y_porcentaje' DEBEN ser números del 0 al 100. El punto 0,0 es la esquina superior izquierda de la foto. "
+        "B) ANCLAJE A LA TINTA: Calcula visualmente DENTRO de la grilla rosa del papel milimetrado. Posiciona las coordenadas (X,Y) EXACTAMENTE sobre los píxeles negros del trazo de la onda anormal (el pico del supradesnivel ST, la onda T invertida, etc). PROHIBIDO colocar marcas en los márgenes blancos, pies de página o fuera del papel. "
+        "C) Crea solo UNA marca por derivación alterada. "
+        "D) 'nivel_riesgo' DEBE ser estrictamente una sola de estas palabras: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo) o 'bajo' (Verde)."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -104,7 +110,6 @@ def analizar_ecg():
     try:
         escala = max(1.0, w_orig / 1200.0)
         
-        # FILTRO DE SEGURIDAD (PERRITO)
         if not analisis_hallazgos.get("es_ecg", True):
             ancho_dog = int(max(800, w_orig))
             alto_dog = int(max(600, h_orig))
@@ -135,7 +140,6 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # FILTRO CABLES INVERTIDOS (SILUETA)
         if analisis_hallazgos.get("cables_invertidos", False):
             ancho_silueta = int(max(900, w_orig))
             alto_silueta = int(max(700, h_orig))
@@ -181,7 +185,6 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # RENDERIZADO MÉDICO NORMAL
         ancho_panel = int(920 * escala)
         col_w = int(42)
         
@@ -204,19 +207,21 @@ def analizar_ecg():
         tecnicas.insert(0, f"CONFIANZA DEL ANÁLISIS VISUAL: {confianza}")
 
         marcas_ia = analisis_hallazgos.get("marcas", [])
+        
+        # Aumentamos la opacidad del color (200 en lugar de 150) para que resalte mucho más
         colores_riesgo = {
-            'critico': ((220, 30, 30, 130), 'Riesgo Crítico'),
-            'alto': ((148, 0, 211, 130), 'Riesgo Alto'),
-            'moderado': ((220, 200, 30, 130), 'Riesgo Moderado'),
-            'bajo': ((30, 200, 30, 130), 'Riesgo Bajo'),
-            'indeterminado': ((30, 100, 220, 130), 'A Confirmar')
+            'critico': ((220, 30, 30, 200), 'Riesgo Crítico'),
+            'alto': ((148, 0, 211, 200), 'Riesgo Alto'),
+            'moderado': ((220, 200, 30, 200), 'Riesgo Moderado'),
+            'bajo': ((30, 200, 30, 200), 'Riesgo Bajo'),
+            'indeterminado': ((30, 100, 220, 200), 'A Confirmar / Artefacto')
         }
 
         tipos_presentes = {}
         for m in marcas_ia:
-            r = str(m.get("nivel_riesgo", "indeterminado")).lower()
-            if r not in colores_riesgo: r = 'indeterminado'
+            r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
             desc = str(m.get("descripcion_breve", "Alteración")).strip()
+            
             if r not in tipos_presentes: tipos_presentes[r] = []
             if desc and desc not in tipos_presentes[r]: tipos_presentes[r].append(desc)
 
@@ -288,14 +293,23 @@ def analizar_ecg():
 
         for m in marcas_ia:
             try:
-                r = str(m.get("nivel_riesgo", "indeterminado")).lower()
-                if r not in colores_riesgo: r = 'indeterminado'
-                px = int(w_orig * (min(max(float(m.get("x_porcentaje", 50)), 0), 100) / 100.0))
-                py = int(h_orig * (min(max(float(m.get("y_porcentaje", 50)), 0), 100) / 100.0))
+                # 1. Filtro estricto de palabras clave para colores
+                r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
+                
+                # 2. Limpieza de caracteres basura (por si la IA devuelve "65%" en vez de 65)
+                raw_x = str(m.get("x_porcentaje", 50)).replace('%', '').strip()
+                raw_y = str(m.get("y_porcentaje", 50)).replace('%', '').strip()
+                x_val = float(raw_x)
+                y_val = float(raw_y)
+                
+                # 3. Forzamos a que las coordenadas se mantengan dentro del área del ECG visible (0 a 100)
+                px = int(w_orig * (max(0.0, min(100.0, x_val)) / 100.0))
+                py = int(h_orig * (max(0.0, min(100.0, y_val)) / 100.0))
                 
                 rad = int(12 * escala)
                 draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], fill=colores_riesgo[r][0])
-            except: continue
+            except Exception:
+                continue
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")
         buf = io.BytesIO()

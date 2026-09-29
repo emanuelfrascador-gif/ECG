@@ -25,7 +25,7 @@ def obtener_riesgo_real(texto_riesgo):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Anclaje a la Tinta Forzado"
+    return "API de Procesamiento de ECG Activa - ST Recíproco, Marcas Múltiples y Leyenda Ordenada"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -67,10 +67,10 @@ def analizar_ecg():
         "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
         "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
         "Si ES un ECG, establece 'es_ecg' in true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
-        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal en 'anamnesis_redactada'. "
-        "2. ERROR DE ENFERMERÍA: Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' in true, y NO diagnostiques nada más. "
+        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos en 'anamnesis_redactada'. "
+        "2. ANÁLISIS DE ISQUEMIA Y ST (CAMBIOS RECÍPROCOS): Al evaluar el segmento ST, estás OBLIGADO a buscar imágenes en espejo (cambios recíprocos) en derivaciones opuestas. Analiza todas las derivaciones en conjunto para confirmar lesión subepicárdica o isquemia. Documenta esto explícitamente. "
         "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula Frecuencia Cardíaca, Ritmo, Eje Eléctrico y QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
-        "4. ANÁLISIS CONDICIONAL: Devuelve un array en 'datos_tecnicos'. Si el parámetro ES NORMAL, escribe únicamente el valor y su rango normal. SOLO si ESTÁ ALTERADO, agrega la posible causa clínica. "
+        "4. ANÁLISIS CONDICIONAL: En 'datos_tecnicos', si el parámetro ES NORMAL, escribe únicamente el valor y su rango normal. SOLO si ESTÁ ALTERADO, agrega la posible causa clínica. "
         "5. CONFIANZA: Asigna un porcentaje en 'confianza_ia'. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
         "'es_ecg' (boolean), 'cables_invertidos' (boolean), 'anamnesis_redactada' (string), 'confianza_ia' (string), "
@@ -79,10 +79,8 @@ def analizar_ecg():
         "'tecnicas_utilizadas' (array strings), "
         "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
         "REGLAS ESTRICTAS DE MARCAS Y COORDENADAS (CRÍTICO): "
-        "A) 'x_porcentaje' y 'y_porcentaje' DEBEN ser números del 0 al 100. El punto 0,0 es la esquina superior izquierda de la foto. "
-        "B) ANCLAJE A LA TINTA: Calcula visualmente DENTRO de la grilla rosa del papel milimetrado. Posiciona las coordenadas (X,Y) EXACTAMENTE sobre los píxeles negros del trazo de la onda anormal (el pico del supradesnivel ST, la onda T invertida, etc). PROHIBIDO colocar marcas en los márgenes blancos, pies de página o fuera del papel. "
-        "C) Crea solo UNA marca por derivación alterada. "
-        "D) 'nivel_riesgo' DEBE ser estrictamente una sola de estas palabras: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo) o 'bajo' (Verde)."
+        "A) EXHAUSTIVIDAD MULTICOLOR: Genera MÚLTIPLES marcas. Debes crear un objeto en el array por CADA derivación alterada. Asigna 'critico' (Rojo) a supradesniveles ST/infartos, 'alto' (Violeta) a infradesniveles ST/isquemia grave/arritmias, 'moderado' (Amarillo) a bloqueos/hipertrofias, y 'bajo' (Verde) a hallazgos leves. "
+        "B) UBICACIÓN EXACTA: 'x_porcentaje' es el eje horizontal (0=izquierda absoluta, 100=derecha absoluta). 'y_porcentaje' es el eje vertical (0=arriba, 100=abajo). Apunta al latido más representativo de cada derivación afectada, cayendo EXACTAMENTE sobre la tinta negra de la anomalía."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -208,7 +206,6 @@ def analizar_ecg():
 
         marcas_ia = analisis_hallazgos.get("marcas", [])
         
-        # Aumentamos la opacidad del color (200 en lugar de 150) para que resalte mucho más
         colores_riesgo = {
             'critico': ((220, 30, 30, 200), 'Riesgo Crítico'),
             'alto': ((148, 0, 211, 200), 'Riesgo Alto'),
@@ -217,20 +214,23 @@ def analizar_ecg():
             'indeterminado': ((30, 100, 220, 200), 'A Confirmar / Artefacto')
         }
 
-        tipos_presentes = {}
+        # Jerarquía estricta para ordenar la leyenda de colores
+        orden_jerarquia = ['critico', 'alto', 'moderado', 'bajo', 'indeterminado']
+        tipos_presentes_crudos = {}
+        
         for m in marcas_ia:
             r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
             desc = str(m.get("descripcion_breve", "Alteración")).strip()
             
-            if r not in tipos_presentes: tipos_presentes[r] = []
-            if desc and desc not in tipos_presentes[r]: tipos_presentes[r].append(desc)
+            if r not in tipos_presentes_crudos: tipos_presentes_crudos[r] = []
+            if desc and desc not in tipos_presentes_crudos[r]: tipos_presentes_crudos[r].append(desc)
 
         def calc_y(lineas):
             h = 20 * escala
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
             return h + (20 * escala)
 
-        h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
+        h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes_crudos) * 60 * escala) + (40*escala)
         h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
         h_c3 = (45*escala) + calc_y(manejo) + calc_y(tecnicas)
 
@@ -270,20 +270,24 @@ def analizar_ecg():
         y_c1 = render_txt(c1_x, y_c1, "ANÁLISIS DE ONDAS Y SEGMENTOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
         
-        if tipos_presentes:
-            draw.text((c1_x, y_c1), "LEYENDA DE COLORES:", fill=(40, 80, 140), font=f_sub)
+        # Renderizado de leyenda con orden jerárquico forzado
+        if tipos_presentes_crudos:
+            draw.text((c1_x, y_c1), "LEYENDA DE COLORES (Por Riesgo):", fill=(40, 80, 140), font=f_sub)
             y_c1 += int(20 * escala)
-            for r, desc_list in tipos_presentes.items():
-                rgba, desc_base = colores_riesgo[r]
-                txt_leyenda = f"{desc_base}: {', '.join(desc_list)}" if desc_list else desc_base
-                
-                r_size = int(10 * escala)
-                draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=rgba)
-                
-                for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
-                    draw.text((c1_x + int(22 * escala), y_c1), p, fill=(50, 50, 50), font=f_texto)
-                    y_c1 += int(16 * escala)
-                y_c1 += int(12 * escala)
+            
+            for r in orden_jerarquia:
+                if r in tipos_presentes_crudos:
+                    desc_list = tipos_presentes_crudos[r]
+                    rgba, desc_base = colores_riesgo[r]
+                    txt_leyenda = f"{desc_base}: {', '.join(desc_list)}" if desc_list else desc_base
+                    
+                    r_size = int(10 * escala)
+                    draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=rgba)
+                    
+                    for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
+                        draw.text((c1_x + int(22 * escala), y_c1), p, fill=(50, 50, 50), font=f_texto)
+                        y_c1 += int(16 * escala)
+                    y_c1 += int(12 * escala)
 
         y_c2 = render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE:", lista_h)
         y_c2 = render_txt(c2_x, y_c2, "ETIOLOGÍA (Diferenciales):", etiologia)
@@ -293,16 +297,13 @@ def analizar_ecg():
 
         for m in marcas_ia:
             try:
-                # 1. Filtro estricto de palabras clave para colores
                 r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
                 
-                # 2. Limpieza de caracteres basura (por si la IA devuelve "65%" en vez de 65)
                 raw_x = str(m.get("x_porcentaje", 50)).replace('%', '').strip()
                 raw_y = str(m.get("y_porcentaje", 50)).replace('%', '').strip()
                 x_val = float(raw_x)
                 y_val = float(raw_y)
                 
-                # 3. Forzamos a que las coordenadas se mantengan dentro del área del ECG visible (0 a 100)
                 px = int(w_orig * (max(0.0, min(100.0, x_val)) / 100.0))
                 py = int(h_orig * (max(0.0, min(100.0, y_val)) / 100.0))
                 

@@ -17,14 +17,12 @@ client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Análisis Inteligente de Parámetros Normales/Alterados"
+    return "API de Procesamiento de ECG Activa - Estable"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
-    # 1. ATRAPAR LA CADENA CRUDA ENVIADA DESDE APP INVENTOR
     datos_crudos = request.args.get('datos', 'Paciente sin datos clínicos proporcionados.')
     
-    # 2. PROCESAR LA IMAGEN
     ecg_orig = None
     data_cruda = request.get_data()
     try:
@@ -55,58 +53,55 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # 3. PROMPT MAESTRO CON REGLA INTELIGENTE PARA PARÁMETROS NORMALES VS ALTERADOS
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
-        f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
-        "REGLA DE ORO INICIAL: Determina si la imagen contiene AL MENOS una línea de derivación de un electrocardiograma. "
-        "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
-        "Si ES un ECG, establece 'es_ecg' in true y sigue estas REGLAS CLÍNICAS MAESTRAS: "
-        "1. ANAMNESIS PROFESIONAL: Toma los 'DATOS CLÍNICOS BRUTOS' provistos y reescríbelos redactando un párrafo clínico formal en 'anamnesis_redactada'. "
-        "2. ERROR DE ENFERMERÍA (CABLES): Verifica obligatoriamente si hay inversión de electrodos. Si detectas cables mal puestos, establece 'cables_invertidos' in true, y NO diagnostiques nada más. "
-        "3. ASESINOS SILENCIOSOS Y MÉTRICAS: Calcula Frecuencia Cardíaca, Ritmo, Eje Eléctrico y QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
-        "4. ANÁLISIS CONDICIONAL DE ONDAS Y SEGMENTOS: Devuelve un array en 'datos_tecnicos'. REGLA ESTRICTA: Si el parámetro (onda, segmento, intervalo, eje o frecuencia) ES NORMAL, escribe únicamente el valor y su rango normal (ej: 'Intervalo PR: 160 ms (Normal: 120-200 ms) - Sin alteraciones'). SOLO si el parámetro ESTÁ ALTERADO, agrega la posible causa clínica (ej: 'Intervalo QTc: 470 ms (Normal: 350-450 ms) - Posible Causa: Repolarización prolongada'). PROHIBIDO poner causas a lo que está normal. "
-        "5. CONFIANZA: Asigna un porcentaje de calidad diagnóstica en 'confianza_ia'. "
-        "Devuelve SOLO un JSON válido con estas claves exactas: "
-        "'es_ecg' (boolean), "
-        "'cables_invertidos' (boolean), "
-        "'anamnesis_redactada' (string), "
-        "'confianza_ia' (string), "
-        "'datos_tecnicos' (array strings con la regla condicional normal vs alterado), "
-        "'lista_hallazgos' (array), 'riesgo_quirurgico' (string), "
-        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), "
-        "'manejo_sac' (string: detalla fármacos y dosis exactas según guías SAC/SAE), "
-        "'tecnicas_utilizadas' (array strings: Enumera criterios específicos buscados, ej: 'Criterios de Sgarbossa', 'Descarte patrón Brugada', etc.), "
-        "'marcas' (array de objetos: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo). "
-        "REGLAS DE MARCAS (PRECISIÓN MILIMÉTRICA ESTRICTA): Correlación 1 a 1 de hallazgos. Marca TODAS las derivaciones afectadas, UNA sola marca por derivación. Anclaje exacto sobre los píxeles de tinta negra del trazo."
+        f"DATOS CLÍNICOS BRUTOS: {datos_crudos}. "
+        "REGLA DE ORO: Determina si la imagen contiene AL MENOS una línea de derivación de un ECG. "
+        "Si NO es un ECG, establece 'es_ecg' en false y deja lo demás vacío. "
+        "Si ES un ECG, establece 'es_ecg' en true y sigue estas reglas: "
+        "1. ANAMNESIS: Redacta un párrafo clínico formal en 'anamnesis_redactada'. "
+        "2. CABLES: Si detectas inversión de electrodos (aVR positivo), pon 'cables_invertidos' en true. "
+        "3. MÉTRICAS Y ASESINOS: Calcula FC, Ritmo, Eje, QTc. Evalúa Sgarbossa, Wellens, Brugada, De Winter. "
+        "4. DATOS TÉCNICOS (Ondas/Segmentos): Array con formato 'Parámetro: Valor (Normal: Rango) - Causa' SOLO si está alterado. Si es normal, pon 'Parámetro: Valor (Normal: Rango) - Sin alteraciones'. "
+        "Devuelve EXCLUSIVAMENTE un JSON con estas claves exactas: "
+        "'es_ecg' (boolean), 'cables_invertidos' (boolean), 'anamnesis_redactada' (string), 'confianza_ia' (string), "
+        "'datos_tecnicos' (array strings), 'lista_hallazgos' (array strings), 'riesgo_quirurgico' (string), "
+        "'etiologia' (string), 'k_estimado' (string), 'ca_estimado' (string), 'manejo_sac' (string), "
+        "'tecnicas_utilizadas' (array strings), "
+        "'marcas' (array de objetos con: x_porcentaje, y_porcentaje, descripcion_breve, nivel_riesgo ('critico','alto','moderado','bajo','indeterminado')). "
+        "Las marcas deben ser 1 por derivación afectada, exactamente sobre los píxeles de tinta negra."
     )
 
-    modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
-    try:
-        mods = [m.name.replace('models/', '') for m in client.models.list() if 'flash' in m.name.lower()]
-        if mods: modelos_autorizados = mods
-    except: pass
-
     analisis_hallazgos = None
-    for modelo in modelos_autorizados:
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[ecg_orig, prompt_maestro],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1
+            )
+        )
+        texto_limpio = response.text.replace("```json", "").replace("```", "").strip()
+        analisis_hallazgos = json.loads(texto_limpio)
+    except Exception as e:
+        # Fallback de respaldo por si flash requiere reintento
         try:
             response = client.models.generate_content(
-                model=modelo,
+                model='gemini-1.5-flash',
                 contents=[ecg_orig, prompt_maestro],
                 config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1)
             )
             analisis_hallazgos = json.loads(response.text.replace("```json", "").replace("```", "").strip())
-            break
-        except Exception:
-            time.sleep(1)
+        except Exception as ex:
+            return {"error": f"Error IA: {str(e)} | Fallback: {str(ex)}"}, 500
 
     if not analisis_hallazgos:
-        return {"error": "IA falló en todos los modelos."}, 500
+        return {"error": "No se pudo obtener JSON válido de la IA."}, 500
 
     try:
         escala = max(1.0, w_orig / 1200.0)
         
-        # FILTRO DE SEGURIDAD (PERRITO)
         if not analisis_hallazgos.get("es_ecg", True):
             ancho_dog = int(max(800, w_orig))
             alto_dog = int(max(600, h_orig))
@@ -137,7 +132,6 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # FILTRO CABLES INVERTIDOS (SILUETA)
         if analisis_hallazgos.get("cables_invertidos", False):
             ancho_silueta = int(max(900, w_orig))
             alto_silueta = int(max(700, h_orig))
@@ -183,34 +177,27 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # RENDERIZADO MÉDICO NORMAL (JERÁRQUICO Y LIMPIO)
         ancho_panel = int(920 * escala)
         col_w = int(42)
         
-        # 1. ANAMNESIS REDACTADA POR LA IA
         anamnesis_texto = str(analisis_hallazgos.get("anamnesis_redactada", datos_crudos))
         anamnesis_lines = [anamnesis_texto]
 
-        # 2. ANÁLISIS DETALLADO DE ONDAS Y SEGMENTOS
         dt = analisis_hallazgos.get("datos_tecnicos", [])
         datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
         
-        # 3. HALLAZGOS Y ETIOLOGÍA
         lista_h = analisis_hallazgos.get("lista_hallazgos", [])
         if not isinstance(lista_h, list): lista_h = [str(lista_h)]
         lista_h.append(f"RIESGO QUIRÚRGICO: {analisis_hallazgos.get('riesgo_quirurgico', 'No evaluado')}")
         etiologia = [str(analisis_hallazgos.get("etiologia", "N/A"))]
         
-        # 4. MANEJO CLÍNICO
         manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
         
-        # 5. TÉCNICAS DE ANÁLISIS IA
         tecnicas = analisis_hallazgos.get("tecnicas_utilizadas", [])
         if not isinstance(tecnicas, list): tecnicas = [str(tecnicas)]
         confianza = analisis_hallazgos.get("confianza_ia", "N/A")
         tecnicas.insert(0, f"CONFIANZA DEL ANÁLISIS VISUAL: {confianza}")
 
-        # LEYENDA Y MARCAS
         marcas_ia = analisis_hallazgos.get("marcas", [])
         colores_riesgo = {
             'critico': ((220, 30, 30, 130), 'Riesgo Crítico'),
@@ -233,7 +220,6 @@ def analizar_ecg():
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (16 * escala)
             return h + (20 * escala)
 
-        # Alturas de Columnas
         h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 60 * escala) + (40*escala)
         h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
         h_c3 = (45*escala) + calc_y(manejo) + calc_y(tecnicas)
@@ -270,7 +256,6 @@ def analizar_ecg():
                     y += int(16 * escala)
             return y + int(20 * escala)
 
-        # RENDER COLUMNA 1 (Anamnesis + Análisis Condicional de Ondas y Segmentos + Ionograma + Leyenda)
         y_c1 = render_txt(c1_x, int(45 * escala), "ANAMNESIS DEL PACIENTE:", anamnesis_lines)
         y_c1 = render_txt(c1_x, y_c1, "ANÁLISIS DE ONDAS Y SEGMENTOS:", datos_t)
         y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
@@ -290,15 +275,12 @@ def analizar_ecg():
                     y_c1 += int(16 * escala)
                 y_c1 += int(12 * escala)
 
-        # RENDER COLUMNA 2 (Hallazgos y Etiología)
         y_c2 = render_txt(c2_x, int(45 * escala), "HALLAZGOS CLAVE:", lista_h)
         y_c2 = render_txt(c2_x, y_c2, "ETIOLOGÍA (Diferenciales):", etiologia)
 
-        # RENDER COLUMNA 3 (Manejo SAC y Técnicas IA)
         y_c3 = render_txt(c3_x, int(45 * escala), "MANEJO CLÍNICO (SAC/SAE):", manejo)
         y_c3 = render_txt(c3_x, y_c3, "TÉCNICAS DE ANÁLISIS IA:", tecnicas)
 
-        # RENDER DE MARCAS
         for m in marcas_ia:
             try:
                 r = str(m.get("nivel_riesgo", "indeterminado")).lower()

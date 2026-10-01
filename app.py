@@ -3,7 +3,7 @@ import os
 import base64
 import json
 import time
-import textwrap
+import textwrapw
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from google import genai

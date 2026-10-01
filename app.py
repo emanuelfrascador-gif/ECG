@@ -3,6 +3,7 @@ import os
 import base64
 import json
 import time
+import math
 import textwrap
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
@@ -23,7 +24,6 @@ def obtener_riesgo_real(texto_riesgo):
     if 'baj' in v: return 'bajo'
     return 'indeterminado'
 
-# NUEVA FUNCIÓN: Buscador robusto de fuentes para evitar texto borroso/pixelado
 def cargar_fuente(tamanio, negrita=False):
     fuentes_normales = ["arial.ttf", "Arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "FreeSans.ttf", "seguiemj.ttf"]
     fuentes_negrita = ["arialbd.ttf", "Arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "FreeSansBold.ttf", "seguisb.ttf"]
@@ -35,6 +35,48 @@ def cargar_fuente(tamanio, negrita=False):
         except Exception:
             pass
     return ImageFont.load_default()
+
+# Función para dibujar la flecha punteada de doble cabeza para las imágenes en espejo
+def draw_dotted_arrow(draw, pt1, pt2, color, escala):
+    x1, y1 = pt1
+    x2, y2 = pt2
+    dist = math.hypot(x2 - x1, y2 - y1)
+    if dist == 0: return
+    
+    angle = math.atan2(y2 - y1, x2 - x1)
+    dash_length = 5 * escala
+    width = max(1, int(1.5 * escala))
+    
+    # Línea punteada
+    d = 0
+    while d < dist:
+        end_d = min(d + dash_length, dist)
+        start_x = x1 + math.cos(angle) * d
+        start_y = y1 + math.sin(angle) * d
+        end_x = x1 + math.cos(angle) * end_d
+        end_y = y1 + math.sin(angle) * end_d
+        draw.line([(start_x, start_y), (end_x, end_y)], fill=color, width=width)
+        d += dash_length * 2
+        
+    # Cabezas de flecha (Doble Punta - Minimalista)
+    head_len = 10 * escala
+    head_angle = math.pi / 6  # 30 grados
+    
+    # Punta en pt1
+    h1_x1 = x1 + head_len * math.cos(angle + head_angle)
+    h1_y1 = y1 + head_len * math.sin(angle + head_angle)
+    h1_x2 = x1 + head_len * math.cos(angle - head_angle)
+    h1_y2 = y1 + head_len * math.sin(angle - head_angle)
+    draw.line([(x1, y1), (h1_x1, h1_y1)], fill=color, width=width)
+    draw.line([(x1, y1), (h1_x2, h1_y2)], fill=color, width=width)
+    
+    # Punta en pt2
+    h2_x1 = x2 - head_len * math.cos(angle + head_angle)
+    h2_y1 = y2 - head_len * math.sin(angle + head_angle)
+    h2_x2 = x2 - head_len * math.cos(angle - head_angle)
+    h2_y2 = y2 - head_len * math.sin(angle - head_angle)
+    draw.line([(x2, y2), (h2_x1, h2_y1)], fill=color, width=width)
+    draw.line([(x2, y2), (h2_x2, h2_y2)], fill=color, width=width)
 
 @app.route("/", methods=["GET"])
 def home():
@@ -74,27 +116,24 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO BLINDADO PARA FORZAR MÚLTIPLES MARCAS
+    # PROMPT MAESTRO TOP MUNDIAL CON IMÁGENES EN ESPEJO Y PRECISIÓN MILIMÉTRICA
     prompt_maestro = (
-        f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
+        f"Actúa como el Mejor Cardiólogo Especialista del Mundo, compitiendo con las mejores IAs médicas. Analiza minuciosamente esta imagen buscando TODO: isquemia, infarto, trastornos del ritmo y conducción, aplicando explícitamente criterios avanzados (ej. Wellens, Sgarbossa, Barbosa, de Winter). "
         f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
         "Si NO es un ECG, establece 'es_ecg' en false y deja el resto vacío. "
         "Si ES un ECG, establece 'es_ecg' en true y sigue estas REGLAS CLÍNICAS MAESTRAS:\n"
-        "1. ANAMNESIS: Reescribe los datos en 'anamnesis_redactada'.\n"
-        "2. DATOS TÉCNICOS: 'datos_tecnicos' DEBE ser una LISTA DE STRINGS legibles en lenguaje natural. Ej: ['Frecuencia cardíaca: 75 lpm', 'Eje: Normal'].\n"
-        "3. Devuelve SOLO un JSON válido con estas claves exactas: 'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'.\n\n"
-        "REGLAS ESTRICTAS E INQUEBRANTABLES PARA 'marcas' (CRÍTICO):\n"
-        "La clave 'marcas' DEBE SER UNA LISTA DE MÚLTIPLES OBJETOS. ESTÁ PROHIBIDO AGRUPAR ALTERACIONES.\n"
-        "- EXHAUSTIVIDAD: Debes crear un objeto SEPARADO por CADA derivación que tenga una alteración. Si hay infradesnivel en V4, V5 y V6, DEBES generar 3 objetos distintos.\n"
-        "- ALTERACIONES MÚLTIPLES: Si en una misma derivación (ej. V5) hay bloqueo Y supradesnivel, crea 2 objetos distintos en esa misma derivación.\n"
-        "- COORDENADAS: 'x_porcentaje' e 'y_porcentaje' (0-100) deben apuntar EXACTAMENTE ENCIMA de la tinta negra de la alteración.\n"
-        "- RIESGO: 'nivel_riesgo' solo puede ser: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde).\n"
-        "EJEMPLO DE ESTRUCTURA OBLIGATORIA PARA 'marcas':\n"
-        "[\n"
-        "  {'x_porcentaje': 42.5, 'y_porcentaje': 60.1, 'nivel_riesgo': 'alto', 'descripcion_breve': 'Infradesnivel ST en V4'},\n"
-        "  {'x_porcentaje': 55.0, 'y_porcentaje': 60.1, 'nivel_riesgo': 'alto', 'descripcion_breve': 'Infradesnivel ST en V5'},\n"
-        "  {'x_porcentaje': 67.5, 'y_porcentaje': 60.1, 'nivel_riesgo': 'alto', 'descripcion_breve': 'Infradesnivel ST en V6'}\n"
-        "]"
+        "1. ANAMNESIS PROFESIONAL: Reescribe los datos en 'anamnesis_redactada'.\n"
+        "2. ANÁLISIS DE ISQUEMIA (CAMBIOS RECÍPROCOS): Identifica implacablemente imágenes en espejo entre derivaciones opuestas.\n"
+        "3. MÉTRICAS: Calcula Frecuencia, Ritmo, Eje, QTc.\n"
+        "4. DATOS TÉCNICOS: Devuelve una LISTA DE STRINGS legibles en lenguaje natural. Si es NORMAL solo valor. Si es ALTERADO, agrega posible causa.\n"
+        "5. Devuelve SOLO un JSON válido con estas claves: 'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'.\n\n"
+        "REGLAS INQUEBRANTABLES PARA 'marcas' (PRECISIÓN LÁSER):\n"
+        "A) EXHAUSTIVIDAD: Crea una marca SEPARADA por CADA derivación alterada. ¡PROHIBIDO AGRUPAR!\n"
+        "B) COORDENADAS EXACTAS: Escanea visualmente la imagen. 'x_porcentaje' e 'y_porcentaje' DEBEN APUNTAR EXACTAMENTE SOBRE LA TINTA NEGRA de la alteración (el pico del supra, la onda T invertida). PROHIBIDO marcar textos o zonas en blanco.\n"
+        "C) RIESGO: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde).\n"
+        "D) ENLACE DE ESPEJOS (NUEVO): Agrega la clave 'id_espejo' a cada marca. Si detectas que una alteración es una imagen recíproca (espejo) de otra, asígnales exactamente el mismo número entero (ej. 1). Si la marca no tiene espejo, su 'id_espejo' debe ser null. Esto unirá ambas con una flecha en el render.\n"
+        "EJEMPLO:\n"
+        "[{'x_porcentaje': 42.5, 'y_porcentaje': 60.1, 'nivel_riesgo': 'critico', 'descripcion_breve': 'Supra ST en inferior', 'id_espejo': 1}, {'x_porcentaje': 55.0, 'y_porcentaje': 20.1, 'nivel_riesgo': 'critico', 'descripcion_breve': 'Infra ST recíproco en lateral', 'id_espejo': 1}]"
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -120,11 +159,9 @@ def analizar_ecg():
         return {"error": "IA falló en todos los modelos."}, 500
 
     try:
-        escala = max(1.2, w_orig / 1000.0) # Escala ajustada para mejor renderizado de textos
+        escala = max(1.2, w_orig / 1000.0)
         
         if not analisis_hallazgos.get("es_ecg", True):
-            # Lógica del perro resumida para ahorrar espacio visual, sin cambios de variables.
-            # ... (se mantiene igual, usando cargar_fuente)
             ancho_dog = int(max(800, w_orig))
             alto_dog = int(max(600, h_orig))
             img_perro = Image.new("RGB", (ancho_dog, alto_dog), color=(255, 255, 255))
@@ -136,7 +173,6 @@ def analizar_ecg():
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
-        # Configuración del Panel Lateral
         ancho_panel = int(950 * escala)
         col_w = int(45)
         
@@ -161,11 +197,11 @@ def analizar_ecg():
         marcas_ia = analisis_hallazgos.get("marcas", [])
         
         colores_riesgo = {
-            'critico': ((220, 30, 30, 220), 'Riesgo Crítico'),
-            'alto': ((148, 0, 211, 220), 'Riesgo Alto'),
-            'moderado': ((220, 200, 30, 220), 'Riesgo Moderado'),
-            'bajo': ((30, 200, 30, 220), 'Riesgo Bajo'),
-            'indeterminado': ((30, 100, 220, 220), 'A Confirmar')
+            'critico': ((220, 30, 30, 140), 'Riesgo Crítico'),
+            'alto': ((148, 0, 211, 140), 'Riesgo Alto'),
+            'moderado': ((220, 200, 30, 140), 'Riesgo Moderado'),
+            'bajo': ((30, 200, 30, 140), 'Riesgo Bajo'),
+            'indeterminado': ((30, 100, 220, 140), 'A Confirmar')
         }
 
         orden_jerarquia = ['critico', 'alto', 'moderado', 'bajo', 'indeterminado']
@@ -194,7 +230,6 @@ def analizar_ecg():
         draw_ov = ImageDraw.Draw(c_overlay)
         draw = ImageDraw.Draw(img_final)
 
-        # Usando la nueva función de fuentes
         f_titulo = cargar_fuente(18 * escala, negrita=True)
         f_sub = cargar_fuente(14 * escala, negrita=True)
         f_texto = cargar_fuente(13 * escala, negrita=False)
@@ -223,16 +258,14 @@ def analizar_ecg():
         if tipos_presentes:
             draw.text((c1_x, y_c1), "LEYENDA DE COLORES (Por Riesgo):", fill=(40, 80, 140), font=f_sub)
             y_c1 += int(25 * escala)
-            
             for r in orden_jerarquia:
                 if r in tipos_presentes:
                     desc_list = tipos_presentes[r]
                     rgba, desc_base = colores_riesgo[r]
                     txt_leyenda = f"{desc_base}: {', '.join(desc_list)}" if desc_list else desc_base
-                    
                     r_size = int(12 * escala)
-                    draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=rgba)
-                    
+                    color_leyenda = (rgba[0], rgba[1], rgba[2], 255)
+                    draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=color_leyenda)
                     for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
                         draw.text((c1_x + int(25 * escala), y_c1), p, fill=(45, 45, 45), font=f_texto)
                         y_c1 += int(18 * escala)
@@ -244,23 +277,40 @@ def analizar_ecg():
         y_c3 = render_txt(c3_x, int(55 * escala), "MANEJO CLÍNICO (SAC/SAE):", manejo)
         y_c3 = render_txt(c3_x, y_c3, "TÉCNICAS DE ANÁLISIS IA:", tecnicas)
 
-        # DIBUJO DE LAS MARCAS SOBRE EL ECG
+        # LÓGICA DE DIBUJO CON SOPORTE DE IMÁGENES EN ESPEJO
+        puntos_espejo = {}
+
         for m in marcas_ia:
             try:
                 r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
                 raw_x = str(m.get("x_porcentaje", 50)).replace('%', '').strip()
                 raw_y = str(m.get("y_porcentaje", 50)).replace('%', '').strip()
-                
                 px = int(w_orig * (max(0.0, min(100.0, float(raw_x))) / 100.0))
                 py = int(h_orig * (max(0.0, min(100.0, float(raw_y))) / 100.0))
                 
                 rad = int(14 * escala)
-                # Dibuja el punto central
                 draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], fill=colores_riesgo[r][0])
-                # Añade un borde sutil para que resalte más en trazados oscuros
-                draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], outline=(255,255,255,180), width=int(2*escala))
+
+                # Almacenar puntos si tienen id_espejo para luego trazar las líneas
+                id_espejo = m.get("id_espejo")
+                if id_espejo is not None:
+                    if id_espejo not in puntos_espejo:
+                        puntos_espejo[id_espejo] = []
+                    puntos_espejo[id_espejo].append( ( (px, py), colores_riesgo[r][0] ) )
             except Exception:
                 continue
+
+        # Dibujar conexiones de puntos espejo (las flechas sutiles)
+        for id_e, puntos in puntos_espejo.items():
+            if len(puntos) >= 2:
+                # Conectar el primer punto con los demás del mismo grupo
+                origen, color_origen = puntos[0]
+                # Modificamos la transparencia de la línea para que sea legible pero no invasiva
+                color_linea = (color_origen[0], color_origen[1], color_origen[2], 200)
+                
+                for i in range(1, len(puntos)):
+                    destino, _ = puntos[i]
+                    draw_dotted_arrow(draw_ov, origen, destino, color_linea, escala)
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")
         buf = io.BytesIO()

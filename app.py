@@ -11,7 +11,8 @@ from google import genai
 from google.genai import types
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 60 * 1024 * 1024
+# BLINDAJE DE MEMORIA PARA RENDER: Limitado a 10MB para evitar que Gunicorn tire SIGKILL por falta de RAM
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 client = genai.Client(api_key=api_key) if api_key else genai.Client()
@@ -255,7 +256,7 @@ def analizar_ecg():
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (18 * escala)
             return h + (25 * escala)
 
-        # CÁLCULO BLINDADO DE ALTURA CON MARGEN PARA LA LEYENDA (Previene que se corte)
+        # CÁLCULO BLINDADO DE ALTURA CON MARGEN PARA LA LEYENDA (Previene cortes)
         h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 75 * escala) + (60*escala)
         h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
         h_c3 = (45*escala) + calc_y(manejo) + calc_y(tecnicas)
@@ -343,7 +344,7 @@ def analizar_ecg():
             if len(puntos) == 2: 
                 origen, color_origen = puntos[0]
                 destino, color_destino = puntos[1]
-                color_linea = (30, 30, 30, 220) # Modificado a negro elegante con leve transparencia
+                color_linea = (30, 30, 30, 220)
                 draw_dotted_arrow(draw_ov, origen, destino, color_linea, escala)
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")

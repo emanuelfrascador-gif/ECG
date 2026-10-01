@@ -34,7 +34,6 @@ def cargar_fuente(tamanio, negrita=False):
     return ImageFont.load_default()
 
 def safe_float(val, default=50.0):
-    """Convierte de forma segura valores locos de la IA a números flotantes"""
     try:
         if val is None: return default
         return float(str(val).replace('%', '').strip())
@@ -113,7 +112,7 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Experta Definitiva"
+    return "API de Procesamiento de ECG Activa - Versión Estricta Definitiva"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -141,26 +140,26 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO RESTAURADO CON TODO EL DETALLE CLÍNICO Y REGLAS DE MARCAS
+    # PROMPT MAESTRO ESTRICTO Y BLINDADO
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen.\n"
         f"DATOS CLÍNICOS DEL PACIENTE: {datos_crudos}\n\n"
-        "REGLAS CLÍNICAS MAESTRAS:\n"
-        "1. ANAMNESIS PROFESIONAL: Reescribe los datos clínicos formalmente en 'anamnesis_redactada'.\n"
-        "2. METODOLOGÍA Y RAZONAMIENTO: En 'tecnicas_utilizadas', genera una LISTA detallada del PASO A PASO clínico de cómo llegaste a tu conclusión (Ej: '1. Medición de intervalos PR, QTc y Eje...', '2. Evaluación de isquemia y patrones de Wellens/Brugada...', '3. Análisis de cambios recíprocos...'). ¡Demuestra tu lógica top mundial!\n"
-        "3. DATOS TÉCNICOS: Devuelve en 'datos_tecnicos' una lista detallada de ondas, segmentos e intervalos. REGLA ESTRICTA: Si el parámetro es normal, pon solo el valor y el rango (ej: 'PR: 160 ms (Normal: 120-200 ms) - Sin alteraciones'). Si está alterado, agrega obligatoriamente la causa clínica correspondiente.\n"
-        "4. HALLAZGOS Y ETIOLOGÍA: OBLIGATORIO rellenar 'lista_hallazgos', 'etiologia' y 'manejo_sac' con detalle exhaustivo. PROHIBIDO dejar campos vacíos o usar 'N/A'.\n"
-        "5. IONOGRAMA: Estima K+ y Ca2+ con precisión.\n\n"
+        "REGLAS CLÍNICAS MAESTRAS (RIGOR ABSOLUTO):\n"
+        "1. ANAMNESIS PROFESIONAL: Reescribe los datos clínicos de forma formal en 'anamnesis_redactada'.\n"
+        "2. METODOLOGÍA Y TÉCNICAS CLAVE ('tecnicas_utilizadas'): Indica estrictamente por jerarquía los epónimos y criterios cardiológicos reales utilizados en tu razonamiento (Ej: '1. Criterios de Sokolow-Lyon / Cornell para HVI', '2. Criterios de Sgarbossa o Wellens para isquemia', '3. Análisis del Eje y bloqueos fasciculares'). Prohibido poner obviedades, demuestra tu nivel top mundial.\n"
+        "3. DATOS TÉCNICOS: Devuelve una lista detallada en 'datos_tecnicos'. REGLA CONDICIONAL: Si el parámetro es normal, solo pon el valor y rango (ej: 'PR: 160 ms (Normal: 120-200 ms) - Sin alteraciones'). Si está alterado, es OBLIGATORIO agregar la causa clínica asociada.\n"
+        "4. HALLAZGOS, ETIOLOGÍA Y CONFIANZA: Rellena obligatoriamente 'lista_hallazgos', 'etiologia' (diferenciales). En 'confianza_ia' DEBES asignar un porcentaje numérico real (ej: '95%') y un nivel formal evaluado en 'riesgo_quirurgico'. PROHIBIDO usar 'N/A' o dejar vacíos.\n"
+        "5. MANEJO CLÍNICO Y FARMACOLOGÍA SAC ('manejo_sac'): Detalla de forma directa las pautas terapéuticas y de conducta médica basadas estrictamente en las guías de la Sociedad Argentina de Cardiología (SAC), incluyendo nombres genéricos de fármacos recomendados y dosis estándares si corresponde.\n"
+        "6. IONOGRAMA: Estima K+ y Ca2+ con valores numéricos reales o aproximaciones clínicas.\n\n"
         "REGLAS ABSOLUTAS PARA 'marcas':\n"
-        "A) EXHAUSTIVIDAD Y MÚLTIPLES PATOLOGÍAS: Crea objetos separados en 'marcas' por cada alteración detectada. Si una misma derivación presenta patologías distintas e independientes (ej. alteración en el segmento ST y otra en la onda T), márcalas por separado en la misma derivación. Si es la misma alteración continua, usa una sola marca por derivación.\n"
-        "B) RIESGO: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde), 'indeterminado' (Azul).\n"
-        "C) ESPEJOS ANATÓMICOS REALES: Usa 'id_espejo'. Asigna el mismo número entero (ej. 1) solo a un par de derivaciones que formen un reflejo recíproco fisiológico para unirlas con flecha punteada. Usa null si no hay reflejo.\n"
-        "ESTRUCTURA JSON OBLIGATORIA PARA 'marcas':\n"
-        "[\n"
-        "  {'x_porcentaje': 42.5, 'y_porcentaje': 60.1, 'nivel_riesgo': 'alto', 'descripcion_breve': 'Infradesnivel en V4', 'id_espejo': null},\n"
-        "  {'x_porcentaje': 55.0, 'y_porcentaje': 20.1, 'nivel_riesgo': 'critico', 'descripcion_breve': 'Supra ST inferior', 'id_espejo': 1},\n"
-        "  {'x_porcentaje': 67.5, 'y_porcentaje': 80.1, 'nivel_riesgo': 'critico', 'descripcion_breve': 'Infra ST recíproco', 'id_espejo': 1}\n"
-        "]\n"
+        "A) EXHAUSTIVIDAD TOTAL Y LIBRE: Los ejemplos de abajo son SOLO de estructura JSON y no limitan tu análisis. Estás OBLIGADO a buscar, detectar y marcar TODAS las patologías, bloqueos (ej. hemibloqueos), arritmias o signos de isquemia presentes en el ECG, sin omitir absolutamente ninguno.\n"
+        "B) COHERENCIA TOTAL TEXTO-MARCAS: Todo hallazgo importante o bloqueo mencionado en tu texto (ej. un hemibloqueo) DEBE verse representado obligatoriamente con una marca gráfica.\n"
+        "C) MÚLTIPLES ALTERACIONES POR DERIVACIÓN: Si una misma derivación presenta patologías distintas e independientes (ej. alteración del ST y otra en la onda T), crea marcas separadas para cada una ubicadas sobre su respectivo latido.\n"
+        "D) RIESGO: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde), 'indeterminado' (Azul).\n"
+        "E) ANCLAJE LÁSER: Posiciona x_porcentaje e y_porcentaje exactamente sobre la tinta negra de la alteración.\n"
+        "F) ESPEJOS ANATÓMICOS REALES ('id_espejo'): Usa el mismo número entero (ej. 1) solo para asociar un par de derivaciones que formen un reflejo recíproco real. Serán unidas con flechas punteadas negras. Usa null si no aplica.\n\n"
+        "Devuelve SOLO un JSON válido con estas claves exactas:\n"
+        "'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -256,7 +255,7 @@ def analizar_ecg():
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (18 * escala)
             return h + (25 * escala)
 
-        # CÁLKULO BLINDADO DE ALTURA (Añade margen vertical extra para que la leyenda nunca se corte)
+        # CÁLCULO BLINDADO DE ALTURA CON MARGEN PARA LA LEYENDA (Previene que se corte)
         h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 75 * escala) + (60*escala)
         h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
         h_c3 = (45*escala) + calc_y(manejo) + calc_y(tecnicas)
@@ -339,11 +338,12 @@ def analizar_ecg():
             except Exception:
                 continue
 
+        # FLECHAS NEGRAS MINIMALISTAS
         for id_e, puntos in puntos_espejo.items():
             if len(puntos) == 2: 
                 origen, color_origen = puntos[0]
                 destino, color_destino = puntos[1]
-                color_linea = (color_origen[0], color_origen[1], color_origen[2], 220)
+                color_linea = (30, 30, 30, 220) # Modificado a negro elegante con leve transparencia
                 draw_dotted_arrow(draw_ov, origen, destino, color_linea, escala)
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")

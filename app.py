@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 
 app = Flask(__name__)
-# BLINDAJE DE MEMORIA PARA RENDER: Limitado a 10MB para evitar que Gunicorn tire SIGKILL por falta de RAM
+# BLINDAJE DE MEMORIA PARA RENDER: Limitado a 10MB
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
@@ -41,7 +41,7 @@ def safe_float(val, default=50.0):
     except Exception:
         return default
 
-# ESCÁNER ANTI-MANCHAS (Blindado matemáticamente)
+# ESCÁNER ANTI-MANCHAS
 def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     gray = img.convert('L')
     pixels = gray.load()
@@ -113,7 +113,7 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Estricta Definitiva"
+    return "API de Procesamiento de ECG Activa - Versión Nivel Dios"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -141,24 +141,23 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO ESTRICTO Y BLINDADO
+    # PROMPT MAESTRO DICTATORIAL (Sin pavadas, nivel experto mundial)
     prompt_maestro = (
-        f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen.\n"
+        f"Actúa como el Mejor Cardiólogo Especialista del Mundo (Nivel Top Global). Analiza minuciosamente esta imagen.\n"
         f"DATOS CLÍNICOS DEL PACIENTE: {datos_crudos}\n\n"
         "REGLAS CLÍNICAS MAESTRAS (RIGOR ABSOLUTO):\n"
-        "1. ANAMNESIS PROFESIONAL: Reescribe los datos clínicos de forma formal en 'anamnesis_redactada'.\n"
-        "2. METODOLOGÍA Y TÉCNICAS CLAVE ('tecnicas_utilizadas'): Indica estrictamente por jerarquía los epónimos y criterios cardiológicos reales utilizados en tu razonamiento (Ej: '1. Criterios de Sokolow-Lyon / Cornell para HVI', '2. Criterios de Sgarbossa o Wellens para isquemia', '3. Análisis del Eje y bloqueos fasciculares'). Prohibido poner obviedades, demuestra tu nivel top mundial.\n"
-        "3. DATOS TÉCNICOS: Devuelve una lista detallada en 'datos_tecnicos'. REGLA CONDICIONAL: Si el parámetro es normal, solo pon el valor y rango (ej: 'PR: 160 ms (Normal: 120-200 ms) - Sin alteraciones'). Si está alterado, es OBLIGATORIO agregar la causa clínica asociada.\n"
-        "4. HALLAZGOS, ETIOLOGÍA Y CONFIANZA: Rellena obligatoriamente 'lista_hallazgos', 'etiologia' (diferenciales). En 'confianza_ia' DEBES asignar un porcentaje numérico real (ej: '95%') y un nivel formal evaluado en 'riesgo_quirurgico'. PROHIBIDO usar 'N/A' o dejar vacíos.\n"
-        "5. MANEJO CLÍNICO Y FARMACOLOGÍA SAC ('manejo_sac'): Detalla de forma directa las pautas terapéuticas y de conducta médica basadas estrictamente en las guías de la Sociedad Argentina de Cardiología (SAC), incluyendo nombres genéricos de fármacos recomendados y dosis estándares si corresponde.\n"
-        "6. IONOGRAMA: Estima K+ y Ca2+ con valores numéricos reales o aproximaciones clínicas.\n\n"
+        "1. ANAMNESIS PROFESIONAL: Reescribe formalmente los datos.\n"
+        "2. METODOLOGÍA Y TÉCNICAS ('tecnicas_utilizadas'): PROHIBIDO escribir obviedades (como 'calibración del papel', 'buscar ondas P' o 'calcular FC'). Describe ÚNICAMENTE los CRITERIOS AVANZADOS, epónimos, triadas y scores que aplicaste en tu razonamiento (Ej: Criterios de Sgarbossa, Wellens, Brugada, Cabrera, Sokolow-Lyon, Cornell, etc.). Demuestra que sos el mejor.\n"
+        "3. DATOS TÉCNICOS: REGLA DE ORO: Si el parámetro es normal, escribe SOLO: '[Parámetro]: [Valor] (Normal: [Rango])'. CERO TEXTO DE RELLENO (no pongas 'sin alteraciones' ni pavadas). Si está alterado, agrega la causa.\n"
+        "4. CONFIANZA IA: En 'confianza_ia' DEBES poner un porcentaje exacto (ej: '95%'). PROHIBIDO usar decimales (ej. 0.95).\n"
+        "5. TRATAMIENTO Y CONDUCTA SAC ('manejo_sac'): Es OBLIGATORIO detallar el manejo farmacológico (nombres genéricos y dosis), recomendaciones de estudios complementarios, internación u observación, basándote ESTRICTAMENTE en las guías de la Sociedad Argentina de Cardiología (SAC).\n"
+        "6. IONOGRAMA: Estima K+ y Ca2+ numéricamente.\n\n"
         "REGLAS ABSOLUTAS PARA 'marcas':\n"
-        "A) EXHAUSTIVIDAD TOTAL Y LIBRE: Los ejemplos de abajo son SOLO de estructura JSON y no limitan tu análisis. Estás OBLIGADO a buscar, detectar y marcar TODAS las patologías, bloqueos (ej. hemibloqueos), arritmias o signos de isquemia presentes en el ECG, sin omitir absolutamente ninguno.\n"
-        "B) COHERENCIA TOTAL TEXTO-MARCAS: Todo hallazgo importante o bloqueo mencionado en tu texto (ej. un hemibloqueo) DEBE verse representado obligatoriamente con una marca gráfica.\n"
-        "C) MÚLTIPLES ALTERACIONES POR DERIVACIÓN: Si una misma derivación presenta patologías distintas e independientes (ej. alteración del ST y otra en la onda T), crea marcas separadas para cada una ubicadas sobre su respectivo latido.\n"
-        "D) RIESGO: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde), 'indeterminado' (Azul).\n"
-        "E) ANCLAJE LÁSER: Posiciona x_porcentaje e y_porcentaje exactamente sobre la tinta negra de la alteración.\n"
-        "F) ESPEJOS ANATÓMICOS REALES ('id_espejo'): Usa el mismo número entero (ej. 1) solo para asociar un par de derivaciones que formen un reflejo recíproco real. Serán unidas con flechas punteadas negras. Usa null si no aplica.\n\n"
+        "A) EXHAUSTIVIDAD TOTAL: Mapea absolutamente TODAS las alteraciones. Si el texto habla de HVI, isquemia o un hemibloqueo, TIENE que haber una marca correlativa en la imagen.\n"
+        "B) MÚLTIPLES MARCAS: Si una misma derivación tiene varias alteraciones distintas (ej. supra ST y además onda T alterada), OBLIGATORIO hacer marcas/objetos separados en esa derivación.\n"
+        "C) RIESGO: Usa 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo) o 'bajo' (Verde). PROHIBIDO usar 'indeterminado' o poner 'A confirmar'. Mójate y clasifica la alteración.\n"
+        "D) ANCLAJE: x_porcentaje e y_porcentaje sobre la tinta negra.\n"
+        "E) ESPEJOS ('id_espejo'): Usa un número entero (ej. 1) para pares recíprocos reales.\n\n"
         "Devuelve SOLO un JSON válido con estas claves exactas:\n"
         "'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'."
     )
@@ -256,10 +255,11 @@ def analizar_ecg():
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (18 * escala)
             return h + (25 * escala)
 
-        # CÁLCULO BLINDADO DE ALTURA CON MARGEN PARA LA LEYENDA (Previene cortes)
+        # CÁLCULO DE ALTURAS BLINDADO
         h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 75 * escala) + (60*escala)
         h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
-        h_c3 = (45*escala) + calc_y(manejo) + calc_y(tecnicas)
+        # Sumamos el espacio de "manejo" a la columna 3
+        h_c3 = (45*escala) + calc_y(tecnicas) + calc_y(manejo) + (40*escala)
 
         alto_final = int(max(h_orig, h_c1, h_c2, h_c3))
         
@@ -312,7 +312,10 @@ def analizar_ecg():
 
         y_c2 = render_txt(c2_x, int(55 * escala), "HALLAZGOS CLAVE:", lista_h)
         y_c2 = render_txt(c2_x, y_c2, "ETIOLOGÍA (Diferenciales):", etiologia)
+        
+        # ACÁ ESTABA EL ERROR: AHORA SÍ DIBUJAMOS LA METODOLOGÍA Y LUEGO EL TRATAMIENTO EN LA COLUMNA 3
         y_c3 = render_txt(c3_x, int(55 * escala), "METODOLOGÍA Y RAZONAMIENTO IA:", tecnicas)
+        y_c3 = render_txt(c3_x, y_c3, "TRATAMIENTO Y CONDUCTA (SAC):", manejo)
 
         puntos_espejo = {}
 
@@ -339,7 +342,6 @@ def analizar_ecg():
             except Exception:
                 continue
 
-        # FLECHAS NEGRAS MINIMALISTAS
         for id_e, puntos in puntos_espejo.items():
             if len(puntos) == 2: 
                 origen, color_origen = puntos[0]

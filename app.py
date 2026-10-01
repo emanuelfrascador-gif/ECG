@@ -33,17 +33,22 @@ def cargar_fuente(tamanio, negrita=False):
         except: pass
     return ImageFont.load_default()
 
-# -----------------------------------------------------------------------------
-# EL NUEVO DESCUBRIMIENTO: ESCÁNER VERTICAL CONTINUO ANTI-MANCHAS
-# -----------------------------------------------------------------------------
+def safe_float(val, default=50.0):
+    """Convierte de forma segura valores locos de la IA a números flotantes"""
+    try:
+        if val is None: return default
+        return float(str(val).replace('%', '').strip())
+    except Exception:
+        return default
+
+# ESCÁNER ANTI-MANCHAS (Blindado matemáticamente)
 def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     gray = img.convert('L')
     pixels = gray.load()
     
-    # Restringimos la búsqueda a una columna vertical estrecha (el latido) 
-    # pero amplia en altura (para encontrar la onda o el desnivel).
-    rx = int(w_orig * 0.02) # 2% de ancho (muy estrecho)
-    ry = int(h_orig * 0.08) # 8% de alto (suficiente para encontrar el pico)
+    # max(1, ...) previene que el radio sea 0 en imágenes muy chicas
+    rx = max(1, int(w_orig * 0.02))
+    ry = max(1, int(h_orig * 0.08))
     
     best_x, best_y = cx, cy
     min_score = float('inf')
@@ -51,18 +56,14 @@ def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     for i in range(max(1, cx - rx), min(w_orig - 1, cx + rx)):
         for j in range(max(1, cy - ry), min(h_orig - 1, cy + ry)):
             val = pixels[i, j]
-            # Si el píxel es oscuro (candidato a tinta de electrocardiograma)
             if val < 130: 
-                # TEST DE CONTINUIDAD: Evita manchas. ¿Tiene píxeles oscuros conectados?
                 vecinos_oscuros = 0
                 for di in [-1, 0, 1]:
                     for dj in [-1, 0, 1]:
                         if pixels[i+di, j+dj] < 150:
                             vecinos_oscuros += 1
                             
-                # Si tiene 3 o más vecinos oscuros, es una línea (trazo), NO una mancha
                 if vecinos_oscuros >= 3:
-                    # Score de cercanía: priorizamos que caiga cerca de lo que dijo la IA
                     dist_sq = (i - cx)**2 + (j - cy)**2
                     score = dist_sq + (val * 2) 
                     
@@ -84,7 +85,6 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
     dash_length = 4 * escala
     width = max(1, int(1.5 * escala))
     
-    # Línea punteada muy fina
     d = 0
     while d < dist:
         end_d = min(d + dash_length, dist)
@@ -95,11 +95,9 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
         draw.line([(start_x, start_y), (end_x, end_y)], fill=color, width=width)
         d += dash_length * 2.5
         
-    # Cabezas de flecha (Punta a Punta)
     head_len = 8 * escala
     head_angle = math.pi / 7
     
-    # Punta en pt1
     h1_x1 = x1 + head_len * math.cos(angle + head_angle)
     h1_y1 = y1 + head_len * math.sin(angle + head_angle)
     h1_x2 = x1 + head_len * math.cos(angle - head_angle)
@@ -107,7 +105,6 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
     draw.line([(x1, y1), (h1_x1, h1_y1)], fill=color, width=width)
     draw.line([(x1, y1), (h1_x2, h1_y2)], fill=color, width=width)
     
-    # Punta en pt2
     h2_x1 = x2 - head_len * math.cos(angle + head_angle)
     h2_y1 = y2 - head_len * math.sin(angle + head_angle)
     h2_x2 = x2 - head_len * math.cos(angle - head_angle)
@@ -145,20 +142,24 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO - RAZONAMIENTO METODOLÓGICO Y PRECISIÓN ESPACIAL
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen.\n"
         f"DATOS CLÍNICOS: {datos_crudos}\n"
         "REGLAS CLÍNICAS MAESTRAS:\n"
         "1. ANAMNESIS PROFESIONAL: Reescribe los datos.\n"
-        "2. METODOLOGÍA Y RAZONAMIENTO (CRÍTICO): En 'tecnicas_utilizadas', NO listes solo los nombres. DEBES generar una LISTA DE STRINGS detallando el PASO A PASO de cómo llegaste a tu conclusión, de mayor a menor importancia. Ej: '1. Detección de elevación del punto J en V2-V3 sugiriendo oclusión proximal de ADA.', '2. Confirmación mediante Criterios de Sgarbossa por presencia de...', '3. Análisis de espejo confirmando lesión...' ¡Demuestra cómo pensaste!\n"
-        "3. DATOS TÉCNICOS: Devuelve una lista de strings legibles. Si es alterado, sugiere causa.\n"
-        "4. Devuelve SOLO un JSON válido con estas claves: 'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'.\n\n"
-        "REGLAS INQUEBRANTABLES PARA 'marcas':\n"
-        "A) EXHAUSTIVIDAD: Crea un objeto separado por CADA derivación alterada. ¡OBLIGATORIO!\n"
-        "B) COORDENADAS: 'x_porcentaje' e 'y_porcentaje' deben apuntar exactamente sobre la alteración del latido.\n"
-        "C) RIESGO: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde).\n"
-        "D) ESPEJOS ANATÓMICOS REALES: Usa 'id_espejo'. SOLO asigna un número (ej. 1) si dos o más derivaciones forman un PAR RECÍPROCO FISIOLÓGICO (ej. Elevación inferior + Depresión lateral). Usa null si no hay reflejo fisiológico a distancia. NUNCA enlaces derivaciones contiguas (ej. V2 y V3) como espejo.\n"
+        "2. METODOLOGÍA Y RAZONAMIENTO: En 'tecnicas_utilizadas', genera una LISTA detallando el PASO A PASO de cómo llegaste a tu conclusión (Ej: '1. Detección de elevación del punto J en V2-V3...', '2. Análisis de espejo confirmando lesión...'). ¡Demuestra tu lógica top mundial!\n"
+        "3. DATOS TÉCNICOS: Devuelve una lista de strings legibles.\n"
+        "4. Devuelve SOLO un JSON válido.\n\n"
+        "REGLAS PARA 'marcas':\n"
+        "A) EXHAUSTIVIDAD: Crea un objeto separado por CADA derivación alterada.\n"
+        "B) RIESGO: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde).\n"
+        "C) ESPEJOS ANATÓMICOS REALES: Usa 'id_espejo'. Asigna el MÚSMO número (ej. 1) solo a derivaciones que formen un PAR RECÍPROCO FISIOLÓGICO. Usa null si no hay reflejo a distancia.\n"
+        "ESTRUCTURA JSON OBLIGATORIA PARA 'marcas':\n"
+        "[\n"
+        "  {'x_porcentaje': 42.5, 'y_porcentaje': 60.1, 'nivel_riesgo': 'alto', 'descripcion_breve': 'Infradesnivel en V4', 'id_espejo': null},\n"
+        "  {'x_porcentaje': 55.0, 'y_porcentaje': 20.1, 'nivel_riesgo': 'critico', 'descripcion_breve': 'Supra ST inferior', 'id_espejo': 1},\n"
+        "  {'x_porcentaje': 67.5, 'y_porcentaje': 80.1, 'nivel_riesgo': 'critico', 'descripcion_breve': 'Infra ST recíproco', 'id_espejo': 1}\n"
+        "]\n"
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -175,13 +176,16 @@ def analizar_ecg():
                 contents=[ecg_orig, prompt_maestro],
                 config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1)
             )
-            analisis_hallazgos = json.loads(response.text.replace("```json", "").replace("```", "").strip())
-            break
+            # Extracción segura de JSON
+            texto_limpio = response.text.replace("```json", "").replace("```", "").strip()
+            analisis_hallazgos = json.loads(texto_limpio)
+            if isinstance(analisis_hallazgos, dict):
+                break
         except Exception:
             time.sleep(1)
 
-    if not analisis_hallazgos:
-        return {"error": "IA falló en todos los modelos."}, 500
+    if not isinstance(analisis_hallazgos, dict):
+        return {"error": "IA falló en todos los modelos o formato inválido."}, 500
 
     try:
         escala = max(1.2, w_orig / 1000.0)
@@ -219,9 +223,18 @@ def analizar_ecg():
         if not isinstance(tecnicas, list): tecnicas = [str(tecnicas)]
         tecnicas.insert(0, f"CONFIANZA DEL ANÁLISIS IA: {analisis_hallazgos.get('confianza_ia', 'N/A')}")
 
-        marcas_ia = analisis_hallazgos.get("marcas", [])
+        # BLINDAJE EXTREMO PARA LA CLAVE "marcas"
+        marcas_crudas = analisis_hallazgos.get("marcas", [])
+        if isinstance(marcas_crudas, dict): 
+            marcas_crudas = [marcas_crudas]
+        elif not isinstance(marcas_crudas, list): 
+            marcas_crudas = []
+            
+        marcas_ia = []
+        for m in marcas_crudas:
+            if isinstance(m, dict):
+                marcas_ia.append(m)
         
-        # Colores
         colores_riesgo = {
             'critico': ((220, 30, 30, 140), 'Riesgo Crítico'),
             'alto': ((148, 0, 211, 140), 'Riesgo Alto'),
@@ -299,7 +312,6 @@ def analizar_ecg():
 
         y_c2 = render_txt(c2_x, int(55 * escala), "HALLAZGOS CLAVE:", lista_h)
         y_c2 = render_txt(c2_x, y_c2, "ETIOLOGÍA (Diferenciales):", etiologia)
-
         y_c3 = render_txt(c3_x, int(55 * escala), "METODOLOGÍA Y RAZONAMIENTO IA:", tecnicas)
 
         puntos_espejo = {}
@@ -307,13 +319,14 @@ def analizar_ecg():
         for m in marcas_ia:
             try:
                 r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
-                raw_x = str(m.get("x_porcentaje", 50)).replace('%', '').strip()
-                raw_y = str(m.get("y_porcentaje", 50)).replace('%', '').strip()
                 
-                ia_x = int(w_orig * (max(0.0, min(100.0, float(raw_x))) / 100.0))
-                ia_y = int(h_orig * (max(0.0, min(100.0, float(raw_y))) / 100.0))
+                # Conversión segura con la nueva función antibalas
+                val_x = safe_float(m.get("x_porcentaje", 50))
+                val_y = safe_float(m.get("y_porcentaje", 50))
                 
-                # EJECUCIÓN DEL ESCÁNER ANTI-MANCHAS
+                ia_x = int(w_orig * (max(0.0, min(100.0, val_x)) / 100.0))
+                ia_y = int(h_orig * (max(0.0, min(100.0, val_y)) / 100.0))
+                
                 px, py = snap_to_ecg_trace_smart(ecg_orig, ia_x, ia_y, w_orig, h_orig)
                 
                 rad = int(14 * escala)
@@ -327,12 +340,10 @@ def analizar_ecg():
             except Exception:
                 continue
 
-        # Dibuja la flecha conectora del mismo color que las marcas unidas
         for id_e, puntos in puntos_espejo.items():
             if len(puntos) == 2: 
                 origen, color_origen = puntos[0]
                 destino, color_destino = puntos[1]
-                # Usa el color de la alteración pero sólido (220 de alpha) para la flecha
                 color_linea = (color_origen[0], color_origen[1], color_origen[2], 220)
                 draw_dotted_arrow(draw_ov, origen, destino, color_linea, escala)
 

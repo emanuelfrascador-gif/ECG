@@ -61,7 +61,7 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO CON ANCLAJE VISUAL DINÁMICO (PUNTERO LÁSER)
+    # PROMPT MAESTRO CON ANCLAJE VISUAL DINÁMICO (PUNTERO LÁSER) CORREGIDO
     prompt_maestro = (
         f"Actúa como el Mejor Cardiólogo Especialista del Mundo. Analiza minuciosamente esta imagen. "
         f"DATOS CLÍNICOS BRUTOS INGRESADOS: {datos_crudos}. "
@@ -71,13 +71,15 @@ def analizar_ecg():
         "1. ANAMNESIS PROFESIONAL: Reescribe los datos en 'anamnesis_redactada'. "
         "2. ANÁLISIS DE ISQUEMIA Y ST (CAMBIOS RECÍPROCOS): Busca siempre imágenes en espejo en derivaciones opuestas. "
         "3. MÉTRICAS: Calcula Frecuencia, Ritmo, Eje, QTc. "
-        "4. ANÁLISIS CONDICIONAL: En 'datos_tecnicos', si es NORMAL solo valor y rango. Si es ALTERADO, agrega posible causa. "
+        "4. ANÁLISIS CONDICIONAL ('datos_tecnicos'): OBLIGATORIO DEVOLVER UNA LISTA DE STRINGS legibles en lenguaje natural (NO devuelvas diccionarios ni formato JSON). Ej: 'Frecuencia cardíaca: 75 lpm (Normal)'. "
         "5. CONFIANZA: Asigna un porcentaje en 'confianza_ia'. "
         "Devuelve SOLO un JSON válido con estas claves exactas: "
         "'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'. "
         "REGLAS ESTRICTAS DE MARCAS Y COORDENADAS (CRÍTICO): "
-        "A) EXHAUSTIVIDAD MULTICOLOR: 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde). Crea una marca separada por CADA derivación alterada. "
-        "B) ANCLAJE VISUAL DINÁMICO (POINTING): ¡Olvida las grillas fijas! Los formatos de foto varían enormemente. Escanea visualmente esta imagen exacta, encuentra la etiqueta de texto de la derivación alterada (ej. 'V2'), mira el latido anormal debajo de ella, y calcula X e Y (0 al 100) para apuntar como un puntero láser EXACTAMENTE SOBRE LOS PÍXELES DE TINTA NEGRA de la alteración (ej. el pico del ST o la T invertida). PROHIBIDO marcar los márgenes de la foto o espacios en blanco."
+        "A) EXHAUSTIVIDAD POR DERIVACIÓN: Crea una marca SEPARADA por CADA derivación alterada. Si hay un infradesnivel en V4, V5 y V6, DEBES ENVIAR 3 MARCAS DISTINTAS (una para V4, una para V5, una para V6). Si en una misma derivación (ej. V5) hay diferentes tipos de alteraciones (ej. supra y bloqueo), envía una marca para cada tipo en esa derivación. "
+        "B) COLORES: Asigna estrictamente 'nivel_riesgo': 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo), 'bajo' (Verde). "
+        "C) ANCLAJE VISUAL DINÁMICO: Para cada marca, calcula X e Y (0 al 100) para ubicar la coordenada EXACTAMENTE POR ENCIMA de la alteración morfológica (tinta negra) de la derivación específica, NUNCA en espacios en blanco al azar. "
+        "D) 'descripcion_breve': En cada marca, pon exactamente la alteración que representa (ej. 'Infradesnivel ST', 'Onda T invertida')."
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -186,8 +188,14 @@ def analizar_ecg():
         anamnesis_texto = str(analisis_hallazgos.get("anamnesis_redactada", datos_crudos))
         anamnesis_lines = [anamnesis_texto]
 
+        # Corrección robusta para datos_tecnicos
         dt = analisis_hallazgos.get("datos_tecnicos", [])
-        datos_t = [str(x) for x in dt] if isinstance(dt, list) else [str(dt)]
+        if isinstance(dt, dict):
+            datos_t = [f"{k}: {v}" for k, v in dt.items()]
+        elif isinstance(dt, list):
+            datos_t = [str(x) for x in dt]
+        else:
+            datos_t = [str(dt)]
         
         lista_h = analisis_hallazgos.get("lista_hallazgos", [])
         if not isinstance(lista_h, list): lista_h = [str(lista_h)]
@@ -216,7 +224,7 @@ def analizar_ecg():
         
         for m in marcas_ia:
             r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
-            desc = str(m.get("descripcion_breve", "Alteración")).strip()
+            desc = str(m.get("descripcion_breve", "Alteración detectada")).strip()
             
             if r not in tipos_presentes_crudos: tipos_presentes_crudos[r] = []
             if desc and desc not in tipos_presentes_crudos[r]: tipos_presentes_crudos[r].append(desc)

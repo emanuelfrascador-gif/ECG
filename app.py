@@ -24,25 +24,14 @@ def obtener_riesgo_real(texto_riesgo):
     if 'baj' in v: return 'bajo'
     return 'indeterminado'
 
-# OPTIMIZACIÓN 1: Caché de fuentes en memoria (Evita lecturas redundantes en disco)
-_font_cache = {}
 def cargar_fuente(tamanio, negrita=False):
-    clave = (tamanio, negrita)
-    if clave in _font_cache: return _font_cache[clave]
-    
-    fuentes_normales = ["arial.ttf", "Arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "FreeSans.ttf"]
-    fuentes_negrita = ["arialbd.ttf", "Arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "FreeSansBold.ttf"]
+    fuentes_normales = ["arial.ttf", "Arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "FreeSans.ttf", "seguiemj.ttf"]
+    fuentes_negrita = ["arialbd.ttf", "Arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "FreeSansBold.ttf", "seguisb.ttf"]
     lista = fuentes_negrita if negrita else fuentes_normales
     for f in lista:
-        try: 
-            fuente = ImageFont.truetype(f, int(tamanio))
-            _font_cache[clave] = fuente
-            return fuente
+        try: return ImageFont.truetype(f, int(tamanio))
         except: pass
-    
-    f_def = ImageFont.load_default()
-    _font_cache[clave] = f_def
-    return f_def
+    return ImageFont.load_default()
 
 def safe_float(val, default=50.0):
     try:
@@ -51,36 +40,37 @@ def safe_float(val, default=50.0):
     except Exception:
         return default
 
-# OPTIMIZACIÓN 2: Escáner de Búsqueda en Espiral (Corta al instante al encontrar el trazo)
+# ESCÁNER ORIGINAL INTACTO
 def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     gray = img.convert('L')
     pixels = gray.load()
     
     rx = max(1, int(w_orig * 0.02))
     ry = max(1, int(h_orig * 0.08))
-    max_r = max(rx, ry)
     
-    def es_trazo(x, y):
-        if pixels[x, y] < 130:
-            oscuros = sum(1 for di in [-1,0,1] for dj in [-1,0,1] 
-                          if 0 <= x+di < w_orig and 0 <= y+dj < h_orig and pixels[x+di, y+dj] < 150)
-            return oscuros >= 3
-        return False
-
-    if es_trazo(cx, cy): return cx, cy
+    best_x, best_y = cx, cy
+    min_score = float('inf')
     
-    for r in range(1, max_r + 1):
-        for dx in range(-r, r + 1):
-            for dy in [-r, r]:
-                nx, ny = cx + dx, cy + dy
-                if 0 <= nx < w_orig and 0 <= ny < h_orig and es_trazo(nx, ny):
-                    return nx, ny
-        for dy in range(-r + 1, r):
-            for dx in [-r, r]:
-                nx, ny = cx + dx, cy + dy
-                if 0 <= nx < w_orig and 0 <= ny < h_orig and es_trazo(nx, ny):
-                    return nx, ny
+    for i in range(max(1, cx - rx), min(w_orig - 1, cx + rx)):
+        for j in range(max(1, cy - ry), min(h_orig - 1, cy + ry)):
+            val = pixels[i, j]
+            if val < 130: 
+                vecinos_oscuros = 0
+                for di in [-1, 0, 1]:
+                    for dj in [-1, 0, 1]:
+                        if pixels[i+di, j+dj] < 150:
+                            vecinos_oscuros += 1
+                            
+                if vecinos_oscuros >= 3:
+                    dist_sq = (i - cx)**2 + (j - cy)**2
+                    score = dist_sq + (val * 2) 
                     
+                    if score < min_score:
+                        min_score = score
+                        best_x, best_y = i, j
+                        
+    if min_score != float('inf'):
+        return best_x, best_y
     return cx, cy
 
 def draw_dotted_arrow(draw, pt1, pt2, color, escala):
@@ -122,7 +112,7 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Ultra Optimizada"
+    return "API de Procesamiento de ECG Activa - Versión Mente Brillante"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -150,19 +140,20 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
+    # PROMPT MAESTRO: IDENTIDAD DE MENTE BRILLANTE Y MEMORIA FOTOGRÁFICA
     prompt_maestro = (
-        "ERES EL MEJOR CARDIÓLOGO DEL MUNDO. Analiza el ECG con rigor clínico absoluto.\n"
+        "ERES EL MEJOR CARDIÓLOGO DEL MUNDO, UNA MENTE BRILLANTE CON MEMORIA FOTOGRÁFICA DE TODAS LAS ALTERACIONES JAMÁS DESCRITAS EN LOS MANUALES DE CARDIOLOGÍA.\n"
         f"DATOS CLÍNICOS: {datos_crudos}\n\n"
-        "REGLAS INQUEBRANTABLES (SI INCUMPLES, EL ANÁLISIS SERÁ RECHAZADO):\n"
+        "REGLAS INQUEBRANTABLES:\n"
         "1. CONFIANZA: 'confianza_ia' DEBE ser un porcentaje entero (ej. '98%'). PROHIBIDO usar decimales.\n"
-        "2. DATOS TÉCNICOS NORMALES: Si un parámetro es normal, escribe SOLO el valor. Ej: 'PR: 160 ms (Normal: 120-200 ms)'. ESTÁ ESTRICTAMENTE PROHIBIDO añadir la frase 'Sin alteraciones', 'normal' o texto extra de relleno.\n"
-        "3. METODOLOGÍA: En 'tecnicas_utilizadas', PROHIBIDO poner pasos básicos. Menciona OBLIGATORIAMENTE los Criterios, Epónimos y Scores avanzados (Sokolow, Cornell, Sgarbossa, Wellens, Brugada, etc.) que aplicaste.\n"
-        "4. TRATAMIENTO FARMACOLÓGICO SAC ('manejo_sac'): Es ESTRICTAMENTE OBLIGATORIO recetar fármacos específicos con sus DOSIS EXACTAS y posología. PROHIBIDO poner solo el grupo terapéutico (ej. 'BB' o 'IECA') o el fármaco sin la dosis. Debes escribir exactamente el fármaco, la dosis y la frecuencia (Ej: 'Aspirina 100 mg/día', 'Bisoprolol 2.5 mg/día'). Si omites las dosis, el análisis es nulo.\n"
+        "2. DATOS TÉCNICOS NORMALES: Si un parámetro es normal, escribe SOLO el valor. Ej: 'PR: 160 ms (Normal: 120-200 ms)'. ESTÁ ESTRICTAMENTE PROHIBIDO añadir texto de relleno como 'Sin alteraciones'.\n"
+        "3. METODOLOGÍA (ENCICLOPEDIA VIVIENTE): Demuestra tu genialidad. Correlaciona minuciosamente TODAS las ondas en conjunto. TIENES QUE EVALUAR y nombrar la aplicación de los criterios de todos los próceres de la cardiología (Wellens, Sgarbossa, Brugada, Sokolow-Lyon, Cornell, Cabrera, de Winter, y absolutamente cualquier otro criterio o triada que exista en la literatura médica). PROHIBIDO poner pasos básicos.\n"
+        "4. TRATAMIENTO FARMACOLÓGICO SAC ('manejo_sac'): Es OBLIGATORIO recetar fármacos específicos con sus DOSIS EXACTAS y posología según la SAC. PROHIBIDO poner solo el grupo terapéutico o el fármaco sin la dosis. Ej: 'Aspirina 100 mg/día'.\n"
         "5. LEYENDA CLARA: En 'descripcion_breve', pon la patología exacta (ej. 'Infradesnivel ST', 'Hemibloqueo'). PROHIBIDO usar la palabra 'Alteración'.\n"
-        "6. RIESGO EN MARCAS: Usa SOLO 'critico', 'alto', 'moderado', o 'bajo'. PROHIBIDO usar 'indeterminado'.\n"
-        "7. EXHAUSTIVIDAD FORZADA: Debes marcar TODAS las patologías detectadas. Si mencionas isquemia en cara inferior (DII, DIII, aVF), ESTÁS OBLIGADO a generar 3 marcas separadas, una para cada derivación.\n"
-        "8. PRECISIÓN ESPACIAL EXTREMA (¡CRÍTICO!): ESTÁ TERMINANTEMENTE PROHIBIDO poner las coordenadas sobre las letras de las derivaciones (ej. 'aVL', 'V1') o sobre las líneas que separan las columnas. Debes apuntar exactamente a la tinta del LATIDO (onda P, complejo QRS, onda T o segmento ST) en la cuadrícula.\n"
-        "9. ESPEJOS ANATÓMICOS: Si detectas una lesión recíproca (ej. supra en cara inferior e infra en cara lateral), DEBES usar el mismo número en 'id_espejo' (ej. 1) en esas marcas para que el sistema dibuje la flecha que las une.\n\n"
+        "6. RIESGO EN MARCAS: Usa SOLO 'critico', 'alto', 'moderado', o 'bajo'.\n"
+        "7. EXHAUSTIVIDAD FORZADA: Con tu memoria fotográfica, identifica CADA anomalía y MÁRCALAS ABSOLUTAMENTE TODAS en las derivaciones correspondientes. Eres exhaustivo al 100%.\n"
+        "8. PRECISIÓN ESPACIAL: Posiciona las coordenadas x_porcentaje e y_porcentaje EXACTAMENTE sobre la tinta del latido afectado en la cuadrícula.\n"
+        "9. ESPEJOS ANATÓMICOS: Si detectas una lesión recíproca (ej. supra en cara inferior e infra en cara lateral), DEBES usar el mismo número en 'id_espejo' (ej. 1) en esas marcas para unirlas.\n\n"
         "DEVUELVE EXCLUSIVAMENTE UN JSON CON ESTA ESTRUCTURA EXACTA:\n"
         "{\n"
         '  "es_ecg": true,\n'
@@ -184,8 +175,8 @@ def analizar_ecg():
         '    "3. Bisoprolol 2.5 mg/día (controlar FC)." \n'
         '  ],\n'
         '  "tecnicas_utilizadas": [\n'
-        '    "1. Criterios de Sokolow-Lyon para HVI",\n'
-        '    "2. Búsqueda de patrón qR en aVL"\n'
+        '    "1. Evaluación exhaustiva de Criterios de Sokolow-Lyon y Cornell.",\n'
+        '    "2. Descartados patrones de Wellens, Brugada y equivalentes isquémicos de de Winter."\n'
         '  ],\n'
         '  "marcas": [\n'
         '    {"x_porcentaje": 45.2, "y_porcentaje": 30.1, "nivel_riesgo": "alto", "descripcion_breve": "Patrón qR (HBAI)", "id_espejo": 1},\n'
@@ -208,206 +199,4 @@ def analizar_ecg():
                 contents=[ecg_orig, prompt_maestro],
                 config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1)
             )
-            texto_limpio = response.text.replace("```json", "").replace("```", "").strip()
-            analisis_hallazgos = json.loads(texto_limpio)
-            if isinstance(analisis_hallazgos, dict):
-                break
-        except Exception:
-            time.sleep(1)
-
-    if not isinstance(analisis_hallazgos, dict):
-        return {"error": "IA falló en todos los modelos o formato inválido."}, 500
-
-    try:
-        escala = max(1.2, w_orig / 1000.0)
-        
-        if not analisis_hallazgos.get("es_ecg", True):
-            ancho_dog = int(max(800, w_orig))
-            alto_dog = int(max(600, h_orig))
-            img_perro = Image.new("RGB", (ancho_dog, alto_dog), color=(255, 255, 255))
-            draw_dog = ImageDraw.Draw(img_perro)
-            f_tit = cargar_fuente(30 * escala, negrita=True)
-            draw_dog.text((ancho_dog//2 - 150, alto_dog//2), "No parece un ECG.", fill=(80, 80, 80), font=f_tit)
-            buf = io.BytesIO()
-            img_perro.save(buf, format="PNG")
-            buf.seek(0)
-            return send_file(buf, mimetype="image/png")
-
-        ancho_panel = int(950 * escala)
-        col_w = int(45)
-        
-        anamnesis_texto = str(analisis_hallazgos.get("anamnesis_redactada", datos_crudos))
-        anamnesis_lines = [anamnesis_texto]
-
-        datos_t_raw = analisis_hallazgos.get("datos_tecnicos", [])
-        if isinstance(datos_t_raw, dict): datos_t_bruto = [f"{k}: {v}" for k, v in datos_t_raw.items()]
-        elif isinstance(datos_t_raw, list): datos_t_bruto = [str(x) for x in datos_t_raw]
-        else: datos_t_bruto = [str(datos_t_raw)]
-        
-        datos_t = []
-        for d in datos_t_bruto:
-            texto_d = str(d)
-            if "Sin alteraciones" in texto_d or "sin alteraciones" in texto_d.lower():
-                partes = texto_d.split("-")
-                if len(partes) > 1:
-                    texto_d = partes[0].strip()
-            datos_t.append(texto_d)
-            
-        lista_h = analisis_hallazgos.get("lista_hallazgos", [])
-        if not isinstance(lista_h, list): lista_h = [str(lista_h)]
-        lista_h.append(f"RIESGO QUIRÚRGICO: {analisis_hallazgos.get('riesgo_quirurgico', 'No evaluado')}")
-        etiologia = [str(analisis_hallazgos.get("etiologia", "N/A"))]
-        
-        manejo_raw = analisis_hallazgos.get("manejo_sac", ["Se requieren más datos para pauta farmacológica."])
-        if isinstance(manejo_raw, str):
-            manejo = manejo_raw.split('\n')
-        elif isinstance(manejo_raw, list):
-            manejo = [str(x) for x in manejo_raw]
-        else:
-            manejo = [str(manejo_raw)]
-        
-        tecnicas = analisis_hallazgos.get("tecnicas_utilizadas", [])
-        if not isinstance(tecnicas, list): tecnicas = [str(tecnicas)]
-        
-        conf_val = analisis_hallazgos.get('confianza_ia', 'N/A')
-        if isinstance(conf_val, (float, int)):
-            if conf_val <= 1:
-                conf_val = f"{int(conf_val * 100)}%"
-            else:
-                conf_val = f"{conf_val}%"
-        tecnicas.insert(0, f"CONFIANZA DEL ANÁLISIS IA: {conf_val}")
-
-        marcas_crudas = analisis_hallazgos.get("marcas", [])
-        if isinstance(marcas_crudas, dict): 
-            marcas_crudas = [marcas_crudas]
-        elif not isinstance(marcas_crudas, list): 
-            marcas_crudas = []
-            
-        marcas_ia = []
-        for m in marcas_crudas:
-            if isinstance(m, dict):
-                marcas_ia.append(m)
-        
-        colores_riesgo = {
-            'critico': ((220, 30, 30, 140), 'Riesgo Crítico'),
-            'alto': ((148, 0, 211, 140), 'Riesgo Alto'),
-            'moderado': ((220, 200, 30, 140), 'Riesgo Moderado'),
-            'bajo': ((30, 200, 30, 140), 'Riesgo Bajo'),
-            'indeterminado': ((30, 100, 220, 140), 'A Confirmar')
-        }
-
-        orden_jerarquia = ['critico', 'alto', 'moderado', 'bajo', 'indeterminado']
-        tipos_presentes = {}
-        
-        for m in marcas_ia:
-            r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
-            desc = str(m.get("descripcion_breve", "Alteración")).strip()
-            if r not in tipos_presentes: tipos_presentes[r] = []
-            if desc and desc not in tipos_presentes[r]: tipos_presentes[r].append(desc)
-
-        def calc_y(lineas):
-            h = 20 * escala
-            for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (18 * escala)
-            return h + (25 * escala)
-
-        h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 75 * escala) + (60*escala)
-        h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
-        h_c3 = (45*escala) + calc_y(tecnicas) + calc_y(manejo) + (40*escala)
-
-        alto_final = int(max(h_orig, h_c1, h_c2, h_c3))
-        
-        img_final = Image.new("RGB", (w_orig + ancho_panel, alto_final), color=(248, 248, 250))
-        img_final.paste(ecg_orig, (0, 0))
-        c_overlay = Image.new("RGBA", img_final.size, (255, 255, 255, 0))
-        draw_ov = ImageDraw.Draw(c_overlay)
-        draw_final = ImageDraw.Draw(img_final)
-
-        f_titulo = cargar_fuente(18 * escala, negrita=True)
-        f_sub = cargar_fuente(14 * escala, negrita=True)
-        f_texto = cargar_fuente(13 * escala, negrita=False)
-
-        c1_x = int(w_orig + (20 * escala))
-        c2_x = int(w_orig + (330 * escala))
-        c3_x = int(w_orig + (640 * escala))
-        
-        draw_final.line([(w_orig, 0), (w_orig, alto_final)], fill=(200, 200, 200), width=int(max(1, escala)))
-        draw_final.text((c1_x, int(15 * escala)), "RESEÑA CARDIOLÓGICA PROFUNDA Y MANEJO CLÍNICO", fill=(20, 50, 100), font=f_titulo)
-        draw_final.line([(c1_x, int(40 * escala)), (w_orig + ancho_panel - int(20 * escala), int(40 * escala))], fill=(220, 220, 220), width=int(max(1, escala)))
-
-        def render_txt(x, y, titulo, lineas):
-            draw_final.text((x, y), titulo, fill=(40, 80, 140), font=f_sub)
-            y += int(25 * escala)
-            for item in lineas:
-                for p in textwrap.wrap(f"• {item}", width=col_w):
-                    draw_final.text((x, y), p, fill=(45, 45, 45), font=f_texto)
-                    y += int(18 * escala)
-            return y + int(25 * escala)
-
-        y_c1 = render_txt(c1_x, int(55 * escala), "ANAMNESIS DEL PACIENTE:", anamnesis_lines)
-        y_c1 = render_txt(c1_x, y_c1, "ANÁLISIS DE ONDAS Y SEGMENTOS:", datos_t)
-        y_c1 = render_txt(c1_x, y_c1, "IONOGRAMA ESTIMADO:", [f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"])
-        
-        if tipos_presentes:
-            draw_final.text((c1_x, y_c1), "LEYENDA DE COLORES (Por Riesgo):", fill=(40, 80, 140), font=f_sub)
-            y_c1 += int(25 * escala)
-            for r in orden_jerarquia:
-                if r in tipos_presentes:
-                    desc_list = tipos_presentes[r]
-                    rgba, desc_base = colores_riesgo[r]
-                    txt_leyenda = f"{desc_base}: {', '.join(desc_list)}" if desc_list else desc_base
-                    r_size = int(12 * escala)
-                    color_leyenda = (rgba[0], rgba[1], rgba[2], 255)
-                    draw_ov.ellipse([c1_x, y_c1+int(2*escala), c1_x+r_size, y_c1+r_size+int(2*escala)], fill=color_leyenda)
-                    for p in textwrap.wrap(txt_leyenda, width=col_w - 2):
-                        draw_final.text((c1_x + int(25 * escala), y_c1), p, fill=(45, 45, 45), font=f_texto)
-                        y_c1 += int(18 * escala)
-                    y_c1 += int(15 * escala)
-
-        y_c2 = render_txt(c2_x, int(55 * escala), "HALLAZGOS CLAVE:", lista_h)
-        y_c2 = render_txt(c2_x, y_c2, "ETIOLOGÍA (Diferenciales):", etiologia)
-        y_c3 = render_txt(c3_x, int(55 * escala), "METODOLOGÍA Y RAZONAMIENTO IA:", tecnicas)
-        y_c3 = render_txt(c3_x, y_c3, "TRATAMIENTO Y CONDUCTA (SAC):", manejo)
-
-        puntos_espejo = {}
-
-        for m in marcas_ia:
-            try:
-                r = obtener_riesgo_real(m.get("nivel_riesgo", "indeterminado"))
-                
-                val_x = safe_float(m.get("x_porcentaje", 50))
-                val_y = safe_float(m.get("y_porcentaje", 50))
-                
-                ia_x = int(w_orig * (max(0.0, min(100.0, val_x)) / 100.0))
-                ia_y = int(h_orig * (max(0.0, min(100.0, val_y)) / 100.0))
-                
-                px, py = snap_to_ecg_trace_smart(ecg_orig, ia_x, ia_y, w_orig, h_orig)
-                
-                rad = int(14 * escala)
-                draw_ov.ellipse([px-rad, py-rad, px+rad, py+rad], fill=colores_riesgo[r][0])
-
-                id_e = m.get("id_espejo")
-                if id_e is not None and str(id_e).strip().lower() not in ["", "null", "none"]:
-                    if id_e not in puntos_espejo:
-                        puntos_espejo[id_e] = []
-                    puntos_espejo[id_e].append( ((px, py), colores_riesgo[r][0]) )
-            except Exception:
-                continue
-
-        for id_e, puntos in puntos_espejo.items():
-            if len(puntos) == 2: 
-                origen, color_origen = puntos[0]
-                destino, color_destino = puntos[1]
-                color_linea = (30, 30, 30, 220)
-                draw_dotted_arrow(draw_ov, origen, destino, color_linea, escala)
-
-        img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")
-        buf = io.BytesIO()
-        img_final.save(buf, format="PNG")
-        buf.seek(0)
-        return send_file(buf, mimetype="image/png")
-
-    except Exception as e:
-        return {"error": f"Error render: {str(e)}"}, 500
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+            texto_limpio = response.text.replace("```json", "").replace("

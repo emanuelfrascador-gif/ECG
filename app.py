@@ -11,7 +11,6 @@ from google import genai
 from google.genai import types
 
 app = Flask(__name__)
-# BLINDAJE DE MEMORIA PARA RENDER: Limitado a 10MB
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
@@ -41,7 +40,7 @@ def safe_float(val, default=50.0):
     except Exception:
         return default
 
-# ESCÁNER ANTI-MANCHAS
+# Escáner optimizado para menor consumo de CPU
 def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     gray = img.convert('L')
     pixels = gray.load()
@@ -52,8 +51,12 @@ def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     best_x, best_y = cx, cy
     min_score = float('inf')
     
-    for i in range(max(1, cx - rx), min(w_orig - 1, cx + rx)):
-        for j in range(max(1, cy - ry), min(h_orig - 1, cy + ry)):
+    # Límites pre-calculados para optimizar el bucle
+    min_x, max_x = max(1, cx - rx), min(w_orig - 1, cx + rx)
+    min_y, max_y = max(1, cy - ry), min(h_orig - 1, cy + ry)
+    
+    for i in range(min_x, max_x):
+        for j in range(min_y, max_y):
             val = pixels[i, j]
             if val < 130: 
                 vecinos_oscuros = 0
@@ -113,7 +116,7 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Nivel Dios"
+    return "API de Procesamiento de ECG Activa - Versión Optimizada"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -141,25 +144,45 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO DICTATORIAL (Sin pavadas, nivel experto mundial)
     prompt_maestro = (
-        f"Actúa como el Mejor Cardiólogo Especialista del Mundo (Nivel Top Global). Analiza minuciosamente esta imagen.\n"
-        f"DATOS CLÍNICOS DEL PACIENTE: {datos_crudos}\n\n"
-        "REGLAS CLÍNICAS MAESTRAS (RIGOR ABSOLUTO):\n"
-        "1. ANAMNESIS PROFESIONAL: Reescribe formalmente los datos.\n"
-        "2. METODOLOGÍA Y TÉCNICAS ('tecnicas_utilizadas'): PROHIBIDO escribir obviedades (como 'calibración del papel', 'buscar ondas P' o 'calcular FC'). Describe ÚNICAMENTE los CRITERIOS AVANZADOS, epónimos, triadas y scores que aplicaste en tu razonamiento (Ej: Criterios de Sgarbossa, Wellens, Brugada, Cabrera, Sokolow-Lyon, Cornell, etc.). Demuestra que sos el mejor.\n"
-        "3. DATOS TÉCNICOS: REGLA DE ORO: Si el parámetro es normal, escribe SOLO: '[Parámetro]: [Valor] (Normal: [Rango])'. CERO TEXTO DE RELLENO (no pongas 'sin alteraciones' ni pavadas). Si está alterado, agrega la causa.\n"
-        "4. CONFIANZA IA: En 'confianza_ia' DEBES poner un porcentaje exacto (ej: '95%'). PROHIBIDO usar decimales (ej. 0.95).\n"
-        "5. TRATAMIENTO Y CONDUCTA SAC ('manejo_sac'): Es OBLIGATORIO detallar el manejo farmacológico (nombres genéricos y dosis), recomendaciones de estudios complementarios, internación u observación, basándote ESTRICTAMENTE en las guías de la Sociedad Argentina de Cardiología (SAC).\n"
-        "6. IONOGRAMA: Estima K+ y Ca2+ numéricamente.\n\n"
-        "REGLAS ABSOLUTAS PARA 'marcas':\n"
-        "A) EXHAUSTIVIDAD TOTAL: Mapea absolutamente TODAS las alteraciones. Si el texto habla de HVI, isquemia o un hemibloqueo, TIENE que haber una marca correlativa en la imagen.\n"
-        "B) MÚLTIPLES MARCAS: Si una misma derivación tiene varias alteraciones distintas (ej. supra ST y además onda T alterada), OBLIGATORIO hacer marcas/objetos separados en esa derivación.\n"
-        "C) RIESGO: Usa 'critico' (Rojo), 'alto' (Violeta), 'moderado' (Amarillo) o 'bajo' (Verde). PROHIBIDO usar 'indeterminado' o poner 'A confirmar'. Mójate y clasifica la alteración.\n"
-        "D) ANCLAJE: x_porcentaje e y_porcentaje sobre la tinta negra.\n"
-        "E) ESPEJOS ('id_espejo'): Usa un número entero (ej. 1) para pares recíprocos reales.\n\n"
-        "Devuelve SOLO un JSON válido con estas claves exactas:\n"
-        "'es_ecg', 'cables_invertidos', 'anamnesis_redactada', 'confianza_ia', 'datos_tecnicos', 'lista_hallazgos', 'riesgo_quirurgico', 'etiologia', 'k_estimado', 'ca_estimado', 'manejo_sac', 'tecnicas_utilizadas', 'marcas'."
+        "ERES EL MEJOR CARDIÓLOGO DEL MUNDO. Analiza el ECG con rigor clínico absoluto.\n"
+        f"DATOS CLÍNICOS: {datos_crudos}\n\n"
+        "REGLAS INQUEBRANTABLES (SI INCUMPLES, EL ANÁLISIS SERÁ RECHAZADO):\n"
+        "1. CONFIANZA: 'confianza_ia' DEBE ser un porcentaje entero (ej. '98%'). PROHIBIDO usar decimales.\n"
+        "2. DATOS TÉCNICOS NORMALES: Si un parámetro es normal, escribe SOLO el valor. Ej: 'PR: 160 ms (Normal: 120-200 ms)'. ESTÁ ESTRICTAMENTE PROHIBIDO añadir la frase 'Sin alteraciones', 'normal' o texto extra de relleno.\n"
+        "3. METODOLOGÍA: En 'tecnicas_utilizadas', PROHIBIDO poner pasos básicos. Menciona OBLIGATORIAMENTE los Criterios, Epónimos y Scores avanzados (Sokolow, Cornell, Sgarbossa, Wellens, Brugada, etc.) que aplicaste.\n"
+        "4. TRATAMIENTO Y FARMACOLOGÍA: En 'manejo_sac' (como lista de strings), detalla nombres de fármacos genéricos, dosis y conducta médica según la SAC. NO LO DEJES VACÍO.\n"
+        "5. COHERENCIA DE MARCAS: Todo hallazgo clínico mencionado en el texto (HVI, isquemia, hemibloqueo, etc.) DEBE tener una o más marcas visuales en 'marcas' sobre las derivaciones afectadas. Genera todas las marcas que sean necesarias, no te limites a una sola.\n"
+        "6. LEYENDA CLARA: En 'descripcion_breve' de cada marca, pon la patología exacta (ej. 'Infradesnivel ST', 'Hemibloqueo anterior'). ESTÁ PROHIBIDO usar la palabra vaga 'Alteración'.\n"
+        "7. RIESGO EN MARCAS: Usa SOLO 'critico', 'alto', 'moderado', o 'bajo'. PROHIBIDO usar 'indeterminado'.\n\n"
+        "DEVUELVE EXCLUSIVAMENTE UN JSON CON ESTA ESTRUCTURA EXACTA (RELLENANDO TODO EL FORMATO):\n"
+        "{\n"
+        '  "es_ecg": true,\n'
+        '  "cables_invertidos": false,\n'
+        '  "anamnesis_redactada": "...",\n'
+        '  "confianza_ia": "98%",\n'
+        '  "datos_tecnicos": [\n'
+        '    "PR: 160 ms (Normal: 120-200 ms)",\n'
+        '    "Eje: -45° (Desviado a la izq por HBAI)"\n'
+        '  ],\n'
+        '  "lista_hallazgos": ["Hemibloqueo anterior izquierdo", "Sobrecarga sistólica"],\n'
+        '  "riesgo_quirurgico": "Riesgo Moderado (Clase II)",\n'
+        '  "etiologia": "...",\n'
+        '  "k_estimado": "4.0",\n'
+        '  "ca_estimado": "9.5",\n'
+        '  "manejo_sac": [\n'
+        '    "1. Iniciar AAS 100mg/día.",\n'
+        '    "2. Derivación a cardiología clínica."\n'
+        '  ],\n'
+        '  "tecnicas_utilizadas": [\n'
+        '    "1. Criterios de Sokolow-Lyon para HVI",\n'
+        '    "2. Búsqueda de patrón qR en aVL"\n'
+        '  ],\n'
+        '  "marcas": [\n'
+        '    {"x_porcentaje": 45.2, "y_porcentaje": 30.1, "nivel_riesgo": "alto", "descripcion_breve": "Patrón qR (HBAI)", "id_espejo": null},\n'
+        '    {"x_porcentaje": 60.5, "y_porcentaje": 70.2, "nivel_riesgo": "moderado", "descripcion_breve": "Voltaje aumentado (HVI)", "id_espejo": null}\n'
+        '  ]\n'
+        "}"
     )
 
     modelos_autorizados = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
@@ -197,7 +220,7 @@ def analizar_ecg():
             f_tit = cargar_fuente(30 * escala, negrita=True)
             draw_dog.text((ancho_dog//2 - 150, alto_dog//2), "No parece un ECG.", fill=(80, 80, 80), font=f_tit)
             buf = io.BytesIO()
-            img_perro.save(buf, format="PNG", compress_level=0)
+            img_perro.save(buf, format="PNG", optimize=True)
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
@@ -207,20 +230,43 @@ def analizar_ecg():
         anamnesis_texto = str(analisis_hallazgos.get("anamnesis_redactada", datos_crudos))
         anamnesis_lines = [anamnesis_texto]
 
-        dt = analisis_hallazgos.get("datos_tecnicos", [])
-        if isinstance(dt, dict): datos_t = [f"{k}: {v}" for k, v in dt.items()]
-        elif isinstance(dt, list): datos_t = [str(x) for x in dt]
-        else: datos_t = [str(dt)]
+        datos_t_raw = analisis_hallazgos.get("datos_tecnicos", [])
+        if isinstance(datos_t_raw, dict): datos_t_bruto = [f"{k}: {v}" for k, v in datos_t_raw.items()]
+        elif isinstance(datos_t_raw, list): datos_t_bruto = [str(x) for x in datos_t_raw]
+        else: datos_t_bruto = [str(datos_t_raw)]
         
+        datos_t = []
+        for d in datos_t_bruto:
+            texto_d = str(d)
+            if "Sin alteraciones" in texto_d or "sin alteraciones" in texto_d.lower():
+                partes = texto_d.split("-")
+                if len(partes) > 1:
+                    texto_d = partes[0].strip()
+            datos_t.append(texto_d)
+            
         lista_h = analisis_hallazgos.get("lista_hallazgos", [])
         if not isinstance(lista_h, list): lista_h = [str(lista_h)]
         lista_h.append(f"RIESGO QUIRÚRGICO: {analisis_hallazgos.get('riesgo_quirurgico', 'No evaluado')}")
         etiologia = [str(analisis_hallazgos.get("etiologia", "N/A"))]
-        manejo = str(analisis_hallazgos.get("manejo_sac", "N/A")).split('\n')
+        
+        manejo_raw = analisis_hallazgos.get("manejo_sac", ["Se requieren más datos para pauta farmacológica."])
+        if isinstance(manejo_raw, str):
+            manejo = manejo_raw.split('\n')
+        elif isinstance(manejo_raw, list):
+            manejo = [str(x) for x in manejo_raw]
+        else:
+            manejo = [str(manejo_raw)]
         
         tecnicas = analisis_hallazgos.get("tecnicas_utilizadas", [])
         if not isinstance(tecnicas, list): tecnicas = [str(tecnicas)]
-        tecnicas.insert(0, f"CONFIANZA DEL ANÁLISIS IA: {analisis_hallazgos.get('confianza_ia', 'N/A')}")
+        
+        conf_val = analisis_hallazgos.get('confianza_ia', 'N/A')
+        if isinstance(conf_val, (float, int)):
+            if conf_val <= 1:
+                conf_val = f"{int(conf_val * 100)}%"
+            else:
+                conf_val = f"{conf_val}%"
+        tecnicas.insert(0, f"CONFIANZA DEL ANÁLISIS IA: {conf_val}")
 
         marcas_crudas = analisis_hallazgos.get("marcas", [])
         if isinstance(marcas_crudas, dict): 
@@ -255,10 +301,8 @@ def analizar_ecg():
             for item in lineas: h += len(textwrap.wrap(f"• {item}", width=col_w)) * (18 * escala)
             return h + (25 * escala)
 
-        # CÁLCULO DE ALTURAS BLINDADO
         h_c1 = (45*escala) + calc_y(anamnesis_lines) + calc_y(datos_t) + calc_y([f"K+: {analisis_hallazgos.get('k_estimado', '')}", f"Ca2+: {analisis_hallazgos.get('ca_estimado', '')}"]) + (len(tipos_presentes) * 75 * escala) + (60*escala)
         h_c2 = (45*escala) + calc_y(lista_h) + calc_y(etiologia)
-        # Sumamos el espacio de "manejo" a la columna 3
         h_c3 = (45*escala) + calc_y(tecnicas) + calc_y(manejo) + (40*escala)
 
         alto_final = int(max(h_orig, h_c1, h_c2, h_c3))
@@ -312,8 +356,6 @@ def analizar_ecg():
 
         y_c2 = render_txt(c2_x, int(55 * escala), "HALLAZGOS CLAVE:", lista_h)
         y_c2 = render_txt(c2_x, y_c2, "ETIOLOGÍA (Diferenciales):", etiologia)
-        
-        # ACÁ ESTABA EL ERROR: AHORA SÍ DIBUJAMOS LA METODOLOGÍA Y LUEGO EL TRATAMIENTO EN LA COLUMNA 3
         y_c3 = render_txt(c3_x, int(55 * escala), "METODOLOGÍA Y RAZONAMIENTO IA:", tecnicas)
         y_c3 = render_txt(c3_x, y_c3, "TRATAMIENTO Y CONDUCTA (SAC):", manejo)
 
@@ -351,7 +393,8 @@ def analizar_ecg():
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")
         buf = io.BytesIO()
-        img_final.save(buf, format="PNG", compress_level=0)
+        # EXPORTACIÓN OPTIMIZADA: Elimina el pixelado visual al evitar archivos masivos en el cliente
+        img_final.save(buf, format="PNG", optimize=True)
         buf.seek(0)
         return send_file(buf, mimetype="image/png")
 

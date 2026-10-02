@@ -11,6 +11,7 @@ from google import genai
 from google.genai import types
 
 app = Flask(__name__)
+# BLINDAJE DE MEMORIA PARA RENDER: Limitado a 10MB
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
@@ -51,7 +52,6 @@ def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     best_x, best_y = cx, cy
     min_score = float('inf')
     
-    # Límites pre-calculados para optimizar el bucle
     min_x, max_x = max(1, cx - rx), min(w_orig - 1, cx + rx)
     min_y, max_y = max(1, cy - ry), min(h_orig - 1, cy + ry)
     
@@ -116,7 +116,7 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Optimizada"
+    return "API de Procesamiento de ECG Activa - Versión Master (Fármacos+Dosis)"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -144,6 +144,7 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
+    # PROMPT MAESTRO CON CONCIENCIA ESPACIAL Y FARMACOLOGÍA ESTRICTA
     prompt_maestro = (
         "ERES EL MEJOR CARDIÓLOGO DEL MUNDO. Analiza el ECG con rigor clínico absoluto.\n"
         f"DATOS CLÍNICOS: {datos_crudos}\n\n"
@@ -151,11 +152,13 @@ def analizar_ecg():
         "1. CONFIANZA: 'confianza_ia' DEBE ser un porcentaje entero (ej. '98%'). PROHIBIDO usar decimales.\n"
         "2. DATOS TÉCNICOS NORMALES: Si un parámetro es normal, escribe SOLO el valor. Ej: 'PR: 160 ms (Normal: 120-200 ms)'. ESTÁ ESTRICTAMENTE PROHIBIDO añadir la frase 'Sin alteraciones', 'normal' o texto extra de relleno.\n"
         "3. METODOLOGÍA: En 'tecnicas_utilizadas', PROHIBIDO poner pasos básicos. Menciona OBLIGATORIAMENTE los Criterios, Epónimos y Scores avanzados (Sokolow, Cornell, Sgarbossa, Wellens, Brugada, etc.) que aplicaste.\n"
-        "4. TRATAMIENTO Y FARMACOLOGÍA: En 'manejo_sac' (como lista de strings), detalla nombres de fármacos genéricos, dosis y conducta médica según la SAC. NO LO DEJES VACÍO.\n"
-        "5. COHERENCIA DE MARCAS: Todo hallazgo clínico mencionado en el texto (HVI, isquemia, hemibloqueo, etc.) DEBE tener una o más marcas visuales en 'marcas' sobre las derivaciones afectadas. Genera todas las marcas que sean necesarias, no te limites a una sola.\n"
-        "6. LEYENDA CLARA: En 'descripcion_breve' de cada marca, pon la patología exacta (ej. 'Infradesnivel ST', 'Hemibloqueo anterior'). ESTÁ PROHIBIDO usar la palabra vaga 'Alteración'.\n"
-        "7. RIESGO EN MARCAS: Usa SOLO 'critico', 'alto', 'moderado', o 'bajo'. PROHIBIDO usar 'indeterminado'.\n\n"
-        "DEVUELVE EXCLUSIVAMENTE UN JSON CON ESTA ESTRUCTURA EXACTA (RELLENANDO TODO EL FORMATO):\n"
+        "4. TRATAMIENTO FARMACOLÓGICO SAC ('manejo_sac'): Es ESTRICTAMENTE OBLIGATORIO recetar fármacos específicos con sus DOSIS EXACTAS y posología. PROHIBIDO poner solo el grupo terapéutico (ej. 'BB' o 'IECA') o el fármaco sin la dosis. Debes escribir exactamente el fármaco, la dosis y la frecuencia (Ej: 'Aspirina 100 mg/día', 'Bisoprolol 2.5 mg/día'). Si omites las dosis, el análisis es nulo.\n"
+        "5. LEYENDA CLARA: En 'descripcion_breve', pon la patología exacta (ej. 'Infradesnivel ST', 'Hemibloqueo'). PROHIBIDO usar la palabra 'Alteración'.\n"
+        "6. RIESGO EN MARCAS: Usa SOLO 'critico', 'alto', 'moderado', o 'bajo'. PROHIBIDO usar 'indeterminado'.\n"
+        "7. EXHAUSTIVIDAD FORZADA: Debes marcar TODAS las patologías detectadas. Si mencionas isquemia en cara inferior (DII, DIII, aVF), ESTÁS OBLIGADO a generar 3 marcas separadas, una para cada derivación.\n"
+        "8. PRECISIÓN ESPACIAL EXTREMA (¡CRÍTICO!): ESTÁ TERMINANTEMENTE PROHIBIDO poner las coordenadas sobre las letras de las derivaciones (ej. 'aVL', 'V1') o sobre las líneas que separan las columnas. Debes apuntar exactamente a la tinta del LATIDO (onda P, complejo QRS, onda T o segmento ST) en la cuadrícula.\n"
+        "9. ESPEJOS ANATÓMICOS: Si detectas una lesión recíproca (ej. supra en cara inferior e infra en cara lateral), DEBES usar el mismo número en 'id_espejo' (ej. 1) en esas marcas para que el sistema dibuje la flecha que las une.\n\n"
+        "DEVUELVE EXCLUSIVAMENTE UN JSON CON ESTA ESTRUCTURA EXACTA:\n"
         "{\n"
         '  "es_ecg": true,\n'
         '  "cables_invertidos": false,\n'
@@ -171,16 +174,17 @@ def analizar_ecg():
         '  "k_estimado": "4.0",\n'
         '  "ca_estimado": "9.5",\n'
         '  "manejo_sac": [\n'
-        '    "1. Iniciar AAS 100mg/día.",\n'
-        '    "2. Derivación a cardiología clínica."\n'
+        '    "1. Iniciar Ácido Acetilsalicílico (AAS) 100 mg/día vía oral.",\n'
+        '    "2. Atorvastatina 40 mg/día vía oral.",\n'
+        '    "3. Bisoprolol 2.5 mg/día (controlar FC)." \n'
         '  ],\n'
         '  "tecnicas_utilizadas": [\n'
         '    "1. Criterios de Sokolow-Lyon para HVI",\n'
         '    "2. Búsqueda de patrón qR en aVL"\n'
         '  ],\n'
         '  "marcas": [\n'
-        '    {"x_porcentaje": 45.2, "y_porcentaje": 30.1, "nivel_riesgo": "alto", "descripcion_breve": "Patrón qR (HBAI)", "id_espejo": null},\n'
-        '    {"x_porcentaje": 60.5, "y_porcentaje": 70.2, "nivel_riesgo": "moderado", "descripcion_breve": "Voltaje aumentado (HVI)", "id_espejo": null}\n'
+        '    {"x_porcentaje": 45.2, "y_porcentaje": 30.1, "nivel_riesgo": "alto", "descripcion_breve": "Patrón qR (HBAI)", "id_espejo": 1},\n'
+        '    {"x_porcentaje": 60.5, "y_porcentaje": 70.2, "nivel_riesgo": "alto", "descripcion_breve": "Cambios recíprocos", "id_espejo": 1}\n'
         '  ]\n'
         "}"
     )
@@ -393,7 +397,6 @@ def analizar_ecg():
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")
         buf = io.BytesIO()
-        # EXPORTACIÓN OPTIMIZADA: Elimina el pixelado visual al evitar archivos masivos en el cliente
         img_final.save(buf, format="PNG", optimize=True)
         buf.seek(0)
         return send_file(buf, mimetype="image/png")

@@ -11,7 +11,6 @@ from google import genai
 from google.genai import types
 
 app = Flask(__name__)
-# BLINDAJE DE MEMORIA PARA RENDER: Limitado a 10MB
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
@@ -25,14 +24,25 @@ def obtener_riesgo_real(texto_riesgo):
     if 'baj' in v: return 'bajo'
     return 'indeterminado'
 
+# OPTIMIZACIÓN 1: Caché de fuentes en memoria (Evita lecturas redundantes en disco)
+_font_cache = {}
 def cargar_fuente(tamanio, negrita=False):
-    fuentes_normales = ["arial.ttf", "Arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "FreeSans.ttf", "seguiemj.ttf"]
-    fuentes_negrita = ["arialbd.ttf", "Arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "FreeSansBold.ttf", "seguisb.ttf"]
+    clave = (tamanio, negrita)
+    if clave in _font_cache: return _font_cache[clave]
+    
+    fuentes_normales = ["arial.ttf", "Arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "FreeSans.ttf"]
+    fuentes_negrita = ["arialbd.ttf", "Arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "FreeSansBold.ttf"]
     lista = fuentes_negrita if negrita else fuentes_normales
     for f in lista:
-        try: return ImageFont.truetype(f, int(tamanio))
+        try: 
+            fuente = ImageFont.truetype(f, int(tamanio))
+            _font_cache[clave] = fuente
+            return fuente
         except: pass
-    return ImageFont.load_default()
+    
+    f_def = ImageFont.load_default()
+    _font_cache[clave] = f_def
+    return f_def
 
 def safe_float(val, default=50.0):
     try:
@@ -41,40 +51,36 @@ def safe_float(val, default=50.0):
     except Exception:
         return default
 
-# Escáner optimizado para menor consumo de CPU
+# OPTIMIZACIÓN 2: Escáner de Búsqueda en Espiral (Corta al instante al encontrar el trazo)
 def snap_to_ecg_trace_smart(img, cx, cy, w_orig, h_orig):
     gray = img.convert('L')
     pixels = gray.load()
     
     rx = max(1, int(w_orig * 0.02))
     ry = max(1, int(h_orig * 0.08))
+    max_r = max(rx, ry)
     
-    best_x, best_y = cx, cy
-    min_score = float('inf')
+    def es_trazo(x, y):
+        if pixels[x, y] < 130:
+            oscuros = sum(1 for di in [-1,0,1] for dj in [-1,0,1] 
+                          if 0 <= x+di < w_orig and 0 <= y+dj < h_orig and pixels[x+di, y+dj] < 150)
+            return oscuros >= 3
+        return False
+
+    if es_trazo(cx, cy): return cx, cy
     
-    min_x, max_x = max(1, cx - rx), min(w_orig - 1, cx + rx)
-    min_y, max_y = max(1, cy - ry), min(h_orig - 1, cy + ry)
-    
-    for i in range(min_x, max_x):
-        for j in range(min_y, max_y):
-            val = pixels[i, j]
-            if val < 130: 
-                vecinos_oscuros = 0
-                for di in [-1, 0, 1]:
-                    for dj in [-1, 0, 1]:
-                        if pixels[i+di, j+dj] < 150:
-                            vecinos_oscuros += 1
-                            
-                if vecinos_oscuros >= 3:
-                    dist_sq = (i - cx)**2 + (j - cy)**2
-                    score = dist_sq + (val * 2) 
+    for r in range(1, max_r + 1):
+        for dx in range(-r, r + 1):
+            for dy in [-r, r]:
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < w_orig and 0 <= ny < h_orig and es_trazo(nx, ny):
+                    return nx, ny
+        for dy in range(-r + 1, r):
+            for dx in [-r, r]:
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < w_orig and 0 <= ny < h_orig and es_trazo(nx, ny):
+                    return nx, ny
                     
-                    if score < min_score:
-                        min_score = score
-                        best_x, best_y = i, j
-                        
-    if min_score != float('inf'):
-        return best_x, best_y
     return cx, cy
 
 def draw_dotted_arrow(draw, pt1, pt2, color, escala):
@@ -116,7 +122,7 @@ def draw_dotted_arrow(draw, pt1, pt2, color, escala):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "API de Procesamiento de ECG Activa - Versión Master (Fármacos+Dosis)"
+    return "API de Procesamiento de ECG Activa - Versión Ultra Optimizada"
 
 @app.route("/analizar", methods=["POST"])
 def analizar_ecg():
@@ -144,7 +150,6 @@ def analizar_ecg():
 
     w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO CON CONCIENCIA ESPACIAL Y FARMACOLOGÍA ESTRICTA
     prompt_maestro = (
         "ERES EL MEJOR CARDIÓLOGO DEL MUNDO. Analiza el ECG con rigor clínico absoluto.\n"
         f"DATOS CLÍNICOS: {datos_crudos}\n\n"
@@ -224,7 +229,7 @@ def analizar_ecg():
             f_tit = cargar_fuente(30 * escala, negrita=True)
             draw_dog.text((ancho_dog//2 - 150, alto_dog//2), "No parece un ECG.", fill=(80, 80, 80), font=f_tit)
             buf = io.BytesIO()
-            img_perro.save(buf, format="PNG", optimize=True)
+            img_perro.save(buf, format="PNG")
             buf.seek(0)
             return send_file(buf, mimetype="image/png")
 
@@ -397,7 +402,7 @@ def analizar_ecg():
 
         img_final = Image.alpha_composite(img_final.convert("RGBA"), c_overlay).convert("RGB")
         buf = io.BytesIO()
-        img_final.save(buf, format="PNG", optimize=True)
+        img_final.save(buf, format="PNG")
         buf.seek(0)
         return send_file(buf, mimetype="image/png")
 

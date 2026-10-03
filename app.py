@@ -5,14 +5,15 @@ import json
 import time
 import math
 import textwrap
+import re
 from flask import Flask, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
 from google.genai import types
 
 app = Flask(__name__)
-# BLINDAJE DE MEMORIA PARA RENDER: Limitado a 10MB para evitar SIGKILL
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
+# BLINDAJE DE MEMORIA PARA RENDER
+app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
 
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 client = genai.Client(api_key=api_key) if api_key else genai.Client()
@@ -140,14 +141,19 @@ def analizar_ecg():
     if not ecg_orig:
         return {"error": "No se recibió ninguna imagen válida."}, 400
 
+    # OPTIMIZACIÓN VITAL CONTRA COLAPSO DE MEMORIA (OOM EN RENDER)
+    # Escala imágenes de celulares (12MP+) a un tamaño manejable de máx 2500px, salvando la RAM.
     w_orig, h_orig = ecg_orig.size
+    if w_orig > 2500 or h_orig > 2500:
+        ecg_orig.thumbnail((2500, 2500), Image.Resampling.LANCZOS)
+        w_orig, h_orig = ecg_orig.size
 
-    # PROMPT MAESTRO DEFINITIVO (Informe técnico puro, sin debates literarios, con derivaciones en leyenda)
+    # PROMPT MAESTRO DEFINITIVO (Informe técnico puro, sin debates, derivaciones en leyenda)
     prompt_maestro = (
         "INSTRUCCIÓN SUPREMA: Eres el Cardiólogo N°1 del Mundo. Analiza este ECG con rigor científico absoluto, onda por onda, con memoria fotográfica de todos los manuales de cardiología.\n"
         f"DATOS CLÍNICOS DEL PACIENTE: {datos_crudos}\n\n"
         "REGLAS INQUEBRANTABLES:\n"
-        "1. CERO ALUCINACIONES: Diagnostica ÚNICAMENTE lo que ves. PROHIBIDO inventar bloqueos o patologías.\n"
+        "1. CERO ALUCINACIONES: Diagnostica ÚNICAMENTE lo que ves. PROHIBIDO inventar patologías.\n"
         "2. CRITERIOS Y METODOLOGÍA PROFESIONAL ('tecnicas_utilizadas'): Lista de forma directa, técnica y profesional los criterios cardiológicos evaluados (ej. Wellens, Sgarbossa, Brugada, Sokolow-Lyon, Cornell, Cabrera, etc.). Indica si son POSITIVOS o NEGATIVOS y la justificación clínica breve. PROHIBIDO escribir diálogos o mencionar asistentes. Solo el informe médico técnico duro.\n"
         "3. ETIOLOGÍA CRÍTICAMENTE FUNDADA: Búsqueda etiológica profunda basada en la clínica y el trazado, evaluando diferenciales.\n"
         "4. TRATAMIENTO Y CONDUCTA SAC ('manejo_sac'): Orden jerárquico. 1° Estudios complementarios/urgencia, 2° Fármacos. CADA FÁRMACO LLEVA: Fármaco + Dosis exacta + (Justificación clínica entre paréntesis).\n"
@@ -190,16 +196,36 @@ def analizar_ecg():
     analisis_hallazgos = None
     for modelo in modelos_autorizados:
         try:
+            # BLINDAJE ANTI-CENSURA MÉDICA: Previene que la IA rechace el prompt por "Medical Advice"
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json", 
+                temperature=0.1,
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
+                ]
+            )
             response = client.models.generate_content(
                 model=modelo,
                 contents=[ecg_orig, prompt_maestro],
-                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1)
+                config=config
             )
-            texto_limpio = response.text.replace("```json", "").replace("```", "").strip()
+            texto = response.text
+            
+            # EXTRACCIÓN DE JSON A PRUEBA DE BALAS
+            match = re.search(r'\{.*\}', texto, re.DOTALL)
+            if match:
+                texto_limpio = match.group(0)
+            else:
+                texto_limpio = texto.replace("```json", "").replace("```", "").strip()
+                
             analisis_hallazgos = json.loads(texto_limpio)
             if isinstance(analisis_hallazgos, dict):
                 break
-        except Exception:
+        except Exception as e:
+            print(f"Error interno con modelo {modelo}: {e}", flush=True)
             time.sleep(1)
 
     if not isinstance(analisis_hallazgos, dict):
@@ -208,7 +234,7 @@ def analizar_ecg():
     try:
         escala = max(1.2, w_orig / 1000.0)
         
-        # PANTALLA DE ERROR: ECG INVÁLIDO CON EL PERRITO
+        # PANTALLA DE ERROR CON EL PERRITO
         if not analisis_hallazgos.get("es_ecg", True):
             ancho_dog = int(max(800, w_orig))
             alto_dog = int(max(600, h_orig))
@@ -314,7 +340,7 @@ def analizar_ecg():
         f_sub = cargar_fuente(14 * escala, negrita=True)
         f_texto = cargar_fuente(13 * escala, negrita=False)
 
-        # BANDA ROJA DE ALERTA CLÍNICA (Se activa si hay riesgo alto o crítico)
+        # BANDA ROJA DE ALERTA CLÍNICA
         hay_riesgo_alto = any(r in tipos_presentes for r in ['critico', 'alto'])
         if hay_riesgo_alto:
             draw_final.rectangle([w_orig, 0, w_orig + ancho_panel, int(35 * escala)], fill=(200, 40, 40))
